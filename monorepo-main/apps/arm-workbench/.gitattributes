@@ -1,0 +1,2 @@
+# Linux deployment files must survive Windows checkouts.
+ops/linux/* text eol=lf

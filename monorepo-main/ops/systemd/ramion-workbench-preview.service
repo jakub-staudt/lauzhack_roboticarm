@@ -1,0 +1,27 @@
+[Unit]
+Description=RAMION workbench - cameras and disconnected preview
+Wants=network-online.target tailscaled.service
+After=network-online.target tailscaled.service
+Conflicts=ramion-workbench-arm.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+User=ramion-workbench
+Group=ramion-workbench
+SupplementaryGroups=video
+WorkingDirectory=/srv/ramion/current/arm-workbench
+EnvironmentFile=/etc/ramion/workbench.env
+StateDirectory=ramion/workbench
+StateDirectoryMode=0700
+ExecStartPre=/usr/bin/test -s /var/lib/ramion/workbench/emergency-stop.json
+ExecStart=/usr/bin/env RAMION_STOP_STATE_FILE=/var/lib/ramion/workbench/emergency-stop.json /bin/bash /srv/ramion/current/arm-workbench/ops/linux/launch-workbench.sh --preview
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

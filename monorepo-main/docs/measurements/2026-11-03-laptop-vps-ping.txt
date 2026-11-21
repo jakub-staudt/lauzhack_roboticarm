@@ -1,0 +1,15 @@
+PING 144.202.61.123 (144.202.61.123): 56 data bytes
+64 bytes from 144.202.61.123: icmp_seq=0 ttl=46 time=126.720 ms
+64 bytes from 144.202.61.123: icmp_seq=1 ttl=46 time=127.719 ms
+64 bytes from 144.202.61.123: icmp_seq=2 ttl=46 time=127.847 ms
+64 bytes from 144.202.61.123: icmp_seq=3 ttl=46 time=128.666 ms
+64 bytes from 144.202.61.123: icmp_seq=4 ttl=46 time=128.267 ms
+64 bytes from 144.202.61.123: icmp_seq=5 ttl=46 time=129.838 ms
+64 bytes from 144.202.61.123: icmp_seq=6 ttl=46 time=126.829 ms
+64 bytes from 144.202.61.123: icmp_seq=7 ttl=46 time=130.221 ms
+64 bytes from 144.202.61.123: icmp_seq=8 ttl=46 time=127.950 ms
+64 bytes from 144.202.61.123: icmp_seq=9 ttl=46 time=128.729 ms
+
+--- 144.202.61.123 ping statistics ---
+10 packets transmitted, 10 packets received, 0.0% packet loss
+round-trip min/avg/max/stddev = 126.720/128.279/130.221/1.081 ms

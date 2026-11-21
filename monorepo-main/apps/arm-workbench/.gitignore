@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# uv
+.venv/
+.venv-*/
+.ipynb_checkpoints/
+
+# Model weights stay on Hugging Face. soarm-lab's base policies (policy.npz, ~0.9 MB each) are the
+# exception; policies trained here go to workspace/.
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+
+# Datasets and recordings
+datasets/
+**/datasets/
+
+# Station data: trained policies (soarm-lab train)
+workspace/
+
+# Local configuration
+configs/local.yaml
+**/configs/local.yaml
+# API keys: DREAM_API_KEY for `uv run --env-file .env soarm-lab dream ...`, TYPESAFE_API_KEY for touch_jev
+# in `uv run --env-file .env twin ui`
+.env
+# The gpu-ops dispatcher's personal values (see .gpu-ops.example), and the job logs it pulls
+.gpu-ops
+logs/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+
+# Personal scratch notebooks stay on the server.
+notebooks/Untitled*.ipynb

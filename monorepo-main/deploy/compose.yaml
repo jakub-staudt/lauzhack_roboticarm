@@ -1,0 +1,63 @@
+# Ramion services in containers. Today: the dashboard only; the arm controller stays a systemd user
+# service on the host until it is containerized too.
+#
+# The dashboard and the systemd ramion-dashboard.service both want 100.85.56.14:8780: run one or the
+# other. For a side-by-side test, publish elsewhere, e.g. DASHBOARD_PUBLISH=100.85.56.14:8790.
+#
+#   docker compose -f deploy/compose.yaml up --build -d dashboard
+#   docker compose -f deploy/compose.yaml logs -f dashboard
+#
+# Settings (shell environment or deploy/.env next to this file):
+#   DASHBOARD_PUBLISH   host address:port to publish on   (default 100.85.56.14:8780 — never a bare port:
+#                       Docker bypasses ufw, so the port must be bound to one host interface explicitly)
+#   CONTROLLER_URL      soarm-panel as seen from the container (default http://100.85.56.14:8765)
+#   VIEWER_URL          Viser as seen from the container      (default http://100.85.56.14:8766)
+#   SCAN_DIR            host directory or named volume for scan sessions (default: named volume)
+#   DASHBOARD_HOSTNAME  name the browser uses for the server  (default ramion-server-01)
+#   DASHBOARD_TAG       image tag (default local)
+
+name: ramion
+
+services:
+  dashboard:
+    image: ghcr.io/ramion-cloud/dashboard:${DASHBOARD_TAG:-local}
+    build:
+      context: ../apps/arm-dashboard
+    restart: unless-stopped
+    # A minimal init as PID 1: the app starts the scan collector as a child process; nothing may linger as a zombie.
+    init: true
+    # The app advertises its hostname in camera_delivery.direct_hosts; panel.js offers direct-access
+    # frame rates to pages opened by that name. Keep it the server's name, not a container id.
+    hostname: ${DASHBOARD_HOSTNAME:-ramion-server-01}
+    ports:
+      - "${DASHBOARD_PUBLISH:-100.85.56.14:8780}:8780"
+    environment:
+      RAMION_DASHBOARD_CONTROLLER__BASE_URL: ${CONTROLLER_URL:-http://100.85.56.14:8765}
+      RAMION_DASHBOARD_VIEWER__BASE_URL: ${VIEWER_URL:-http://100.85.56.14:8766}
+    volumes:
+      # A host directory must be writable by uid 10001 (the image's dashboard user).
+      - ${SCAN_DIR:-dashboard-scans}:/var/lib/ramion/scans
+    # Reaches a controller on the Docker host (Docker Desktop provides this name; on Linux this adds it).
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    # SIGTERM, then time for open requests and for stopping a running scan collector.
+    stop_grace_period: 20s
+    # Resource budget from the dockerization plan (§3.4): the scan collector is the heavy part.
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 256
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+
+volumes:
+  dashboard-scans:

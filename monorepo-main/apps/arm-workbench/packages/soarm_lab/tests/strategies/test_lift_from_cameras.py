@@ -1,0 +1,112 @@
+"""The whole sim-to-real chain at once: the lift policy on a live twin, the cube ONLY from the cameras.
+
+The policy as the lab's strategy: frames of simulated cameras -> the twin's example cube detector
+(`machinekind-twin-cube`, a colour mask per camera) -> the twin's `Perception` (a cube fitted to the
+silhouettes with the arm masked out, then tracked in the hand) -> `ObjectPose` in the observation ->
+`PolicyStrategy` in the twin's `StrategyRunner` -> the safety supervisor -> physics. The physics truth
+tells whether the cube was lifted. The test runs the bundled `lift-v3`.
+
+The whole chain runs in SIMULATED time, without threads: the twin's loop at 50 Hz (`Twin.step`), the
+detector every 0.1 s (`DetectorRunner.step_once`) and the strategy at 20 Hz (`StrategyRunner.step_once`)
+on one clock. `Perception` gets that clock and a frame source stamping on it.
+
+The hand is `Perception`'s default: the gripper command from the twin's `status.command` and the closed
+jaw from the twin's joint limits, as the panel has it.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+pytestmark = [pytest.mark.twin, pytest.mark.render]
+mujoco = pytest.importorskip("mujoco")
+pytest.importorskip("machinekind_twin")
+
+from machinekind_twin import scene as sc  # noqa: E402
+from machinekind_twin.clock import VirtualClock  # noqa: E402
+from machinekind_twin.detection import Perception  # noqa: E402
+from machinekind_twin.detectors import load_detector  # noqa: E402
+from machinekind_twin.kinematics import inverse, pose  # noqa: E402
+from machinekind_twin.runtime import Twin  # noqa: E402
+from machinekind_twin.strategy import StrategyRunner  # noqa: E402
+from machinekind_twin.ui.watch import arm_mask  # noqa: E402
+from machinekind_twin.workspace import CameraRecord, Workspace  # noqa: E402
+
+from soarm_lab.rl import task as tk  # noqa: E402
+from soarm_lab.strategies.policy import PolicySettings, PolicyStrategy  # noqa: E402
+
+
+def look(eye, target):
+    eye = np.asarray(eye, float)
+    z = np.asarray(target, float) - eye
+    z /= np.linalg.norm(z)
+    x = np.cross(z, [0, 0, 1.0])
+    x /= np.linalg.norm(x)
+    return pose(np.column_stack([x, np.cross(z, x), z]), eye)
+
+
+def test_lift_policy_lifts_a_cube_seen_only_by_cameras(twin_robots):
+    ws = Workspace(robot="so101")
+    K = [[560.0, 0, 322.0], [0, 560.0, 236.0], [0, 0, 1]]
+    for name, eye in (("a", [0.55, -0.45, 0.45]), ("b", [0.5, 0.5, 0.5])):
+        T = look(eye, [0.2, 0, 0]).tolist()
+        ws.add_camera(CameraRecord(name, "sim", 640, 480, K=K, sim_pose=T, T_cam2base=T,
+                                   calibration={"trusted": True}))
+    strategy = PolicyStrategy(PolicySettings(policy="lift-v3"))
+    task = strategy.task
+    h = task.cube_half
+    twin = Twin(ws, clock=VirtualClock(t0=0.0))
+    try:
+        twin.configure(objects=[sc.Box("cube", (h, h, h), (0.2, 0.0), rgba=(0.85, 0.25, 0.2, 1.0),
+                                       mass=task.cube_mass)], grasp_sensors=["cube"])
+        twin.connect("sim", threaded=False)
+        pos, quat = tk.sample_cubes(task, np.random.default_rng(5), 1)
+        with twin.lock:
+            s = twin.scene
+            m, d = s.model, s.data
+            b = m.body("cube").id
+            a = m.jnt_qposadr[m.body_jntadr[b]]
+            T = s.T_base2world
+            qb, qw = np.zeros(4), np.zeros(4)
+            mujoco.mju_mat2Quat(qb, T[:3, :3].ravel())
+            mujoco.mju_mulQuat(qw, qb, quat[0])
+            d.qpos[a:a + 3] = T[:3, :3] @ pos[0] + T[:3, 3]
+            d.qpos[a + 3:a + 7] = qw
+            mujoco.mj_forward(m, d)
+
+        clock = {"t": 0.0}
+        perception = Perception(
+            twin, ws, clock=lambda: clock["t"],
+            frame=lambda c: (twin.render(c), clock["t"]),
+            occluders=lambda times: twin.render_with(
+                lambda sc_: {c: arm_mask(sc_, c, dilate=5) for c in times}))
+        # The example detector's key is "cube", the label the policy reads.
+        detector = perception.start_detector(load_detector("cube"), {"size_m": 2 * h, "interval_s": 0.1},
+                                             threaded=False)
+
+        runner = StrategyRunner(twin, strategy, objects=perception.objects)
+        runner.start(threaded=False)
+        # A clock tick every 10 ms: physics every 20 ms, vision every 100 ms, the strategy every 50 ms.
+        for k in range(1, int(30.0 / 0.01) + 1):
+            clock["t"] = k * 0.01
+            if k % 2 == 0:
+                twin.step(0.02)
+            if k % 10 == 0:
+                detector.step_once()
+            if k % 5 == 0 and not runner.step_once(clock["t"]):
+                break
+        with twin.lock:
+            s = twin.scene
+            Ti = inverse(s.T_base2world)
+            height = (Ti[:3, :3] @ s.data.xpos[s.model.body("cube").id] + Ti[:3, 3])[2] - h
+        seen = {v.label: v.source for v in perception.snapshot()}
+        perception.stop_all("koniec testu")
+        where = (f"takt {strategy.status.step}, powod {strategy.status.stopped_because!r}, kostka ze zrodla "
+                 f"{seen.get('cube')!r}, {height * 100:.1f} cm nad blatem")
+        # The run ends on success (the cube above the table for `end_on_success` ticks) or at the
+        # episode limit.
+        assert strategy.status.stopped_because in ("zadanie wykonane", "koniec epizodu"), where
+        assert height > task.lift_height, where
+    finally:
+        twin.close()

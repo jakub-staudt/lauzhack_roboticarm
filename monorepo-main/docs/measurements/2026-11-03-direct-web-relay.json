@@ -1,0 +1,513 @@
+{
+  "measured_at_utc": "2026-11-03T11:31:58.977359+00:00",
+  "method": "Sequential GET /api/state with fresh HTTP connections; read-only. Optional two continuous MJPEG streams. No POSTs, physical movement, browser rendering or sensor timestamps.",
+  "samples_per_phase": 8,
+  "interval_after_response_s": 0.3,
+  "targets": {
+    "http://127.0.0.1:8780": {
+      "baseline": {
+        "started_utc": "2026-11-03T11:31:58.977483+00:00",
+        "streams_requested": false,
+        "samples": [
+          {
+            "elapsed_ms": 536.042,
+            "headers_ms": 401.271,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67137,
+            "server_state_age_ms": 27.466,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 23.68285997982877,
+                "server_frame_age_ms": 29.586
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.309286964739567,
+                "server_frame_age_ms": 0.396
+              }
+            }
+          },
+          {
+            "elapsed_ms": 533.396,
+            "headers_ms": 497.484,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67156,
+            "server_state_age_ms": 4.994,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 31.286896045016622,
+                "server_frame_age_ms": 33.453
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 28.62304737635116,
+                "server_frame_age_ms": 17.919
+              }
+            }
+          },
+          {
+            "elapsed_ms": 536.632,
+            "headers_ms": 500.429,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67172,
+            "server_state_age_ms": 43.135,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 31.776764414192574,
+                "server_frame_age_ms": 9.863
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.176369996098238,
+                "server_frame_age_ms": 9.15
+              }
+            }
+          },
+          {
+            "elapsed_ms": 530.484,
+            "headers_ms": 490.326,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67189,
+            "server_state_age_ms": 28.099,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 29.597922581282564,
+                "server_frame_age_ms": 17.469
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 32.89144337563918,
+                "server_frame_age_ms": 3.325
+              }
+            }
+          },
+          {
+            "elapsed_ms": 621.028,
+            "headers_ms": 496.801,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67206,
+            "server_state_age_ms": 16.021,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 28.068636684760172,
+                "server_frame_age_ms": 26.582
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.896405690259687,
+                "server_frame_age_ms": 26.97
+              }
+            }
+          },
+          {
+            "elapsed_ms": 426.678,
+            "headers_ms": 399.878,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67222,
+            "server_state_age_ms": 36.75,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 31.222607045980283,
+                "server_frame_age_ms": 20.977
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.9413573443117,
+                "server_frame_age_ms": 1.789
+              }
+            }
+          },
+          {
+            "elapsed_ms": 560.562,
+            "headers_ms": 504.724,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67239,
+            "server_state_age_ms": 13.969,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 31.127972511692814,
+                "server_frame_age_ms": 22.444
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 30.85004840609,
+                "server_frame_age_ms": 17.803
+              }
+            }
+          },
+          {
+            "elapsed_ms": 628.689,
+            "headers_ms": 492.753,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67256,
+            "server_state_age_ms": 20.64,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 30.787309082996327,
+                "server_frame_age_ms": 17.146
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 26.554214878560913,
+                "server_frame_age_ms": 28.725
+              }
+            }
+          }
+        ],
+        "cameras": [],
+        "summary": {
+          "successful": 8,
+          "errors": 0,
+          "http_roundtrip_ms": {
+            "n": 8,
+            "min": 426.678,
+            "p50": 536.337,
+            "p95": 626.008,
+            "max": 628.689
+          },
+          "server_state_age_ms": {
+            "n": 8,
+            "min": 4.994,
+            "p50": 24.053,
+            "p95": 40.9,
+            "max": 43.135
+          },
+          "responses_over_ui_1800ms": 0,
+          "responses_over_lease_1500ms": 0
+        }
+      },
+      "two_cameras": {
+        "started_utc": "2026-11-03T11:32:05.474580+00:00",
+        "streams_requested": true,
+        "samples": [
+          {
+            "elapsed_ms": 563.864,
+            "headers_ms": 534.201,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67269,
+            "server_state_age_ms": 32.836,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 24.250861191798126,
+                "server_frame_age_ms": 18.206
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 23.06277530872225,
+                "server_frame_age_ms": 17.554
+              }
+            }
+          },
+          {
+            "elapsed_ms": 743.424,
+            "headers_ms": 710.331,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67290,
+            "server_state_age_ms": 11.083,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 28.536074011459352,
+                "server_frame_age_ms": 26.872
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 39.82150726212704,
+                "server_frame_age_ms": 4.028
+              }
+            }
+          },
+          {
+            "elapsed_ms": 562.894,
+            "headers_ms": 561.177,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67308,
+            "server_state_age_ms": 11.25,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 24.541066114158923,
+                "server_frame_age_ms": 26.26
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 29.753947352668952,
+                "server_frame_age_ms": 17.165
+              }
+            }
+          },
+          {
+            "elapsed_ms": 540.28,
+            "headers_ms": 524.492,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67324,
+            "server_state_age_ms": 44.96,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 27.654865729421214,
+                "server_frame_age_ms": 34.328
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 31.931693765527346,
+                "server_frame_age_ms": 6.528
+              }
+            }
+          },
+          {
+            "elapsed_ms": 651.426,
+            "headers_ms": 651.031,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67343,
+            "server_state_age_ms": 25.913,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 44.612044955120986,
+                "server_frame_age_ms": 13.474
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 42.44195383235893,
+                "server_frame_age_ms": 2.757
+              }
+            }
+          },
+          {
+            "elapsed_ms": 641.865,
+            "headers_ms": 631.708,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67362,
+            "server_state_age_ms": 39.307,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 30.777514184211718,
+                "server_frame_age_ms": 10.155
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 28.21235302916904,
+                "server_frame_age_ms": 7.07
+              }
+            }
+          },
+          {
+            "elapsed_ms": 654.308,
+            "headers_ms": 624.144,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67381,
+            "server_state_age_ms": 31.134,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 25.39676476812864,
+                "server_frame_age_ms": 22.457
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.875980990500143,
+                "server_frame_age_ms": 1.799
+              }
+            }
+          },
+          {
+            "elapsed_ms": 698.775,
+            "headers_ms": 626.193,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 67400,
+            "server_state_age_ms": 42.184,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 24.26008617117602,
+                "server_frame_age_ms": 25.105
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.529153578000788,
+                "server_frame_age_ms": 17.638
+              }
+            }
+          }
+        ],
+        "cameras": [
+          {
+            "name": "overhead",
+            "frame_receive_times_ms": [
+              947.743,
+              1152.935,
+              1569.872,
+              2177.549,
+              2601.789,
+              3188.729,
+              3555.608,
+              4060.284,
+              4673.692,
+              5059.502,
+              5560.079,
+              6056.382,
+              6582.804,
+              7059.65,
+              7574.851
+            ],
+            "frame_sizes_bytes": [
+              109121,
+              108940,
+              109307,
+              109168,
+              109006,
+              109031,
+              108968,
+              109313,
+              108773,
+              108996,
+              108902,
+              109383,
+              109095,
+              108958,
+              109153
+            ],
+            "status": 200,
+            "first_complete_frame_ms": 947.743,
+            "interarrival_ms": {
+              "n": 14,
+              "min": 205.192,
+              "p50": 498.44,
+              "p95": 609.683,
+              "max": 613.408
+            },
+            "received_fps": 2.113,
+            "duration_ms": 7575.017
+          },
+          {
+            "name": "wrist",
+            "frame_receive_times_ms": [
+              1079.749,
+              1208.152,
+              1610.909,
+              2097.962,
+              2570.93,
+              3064.98,
+              3586.037,
+              4116.886,
+              4561.433,
+              5083.157,
+              5616.157,
+              6145.093,
+              6560.415,
+              7105.563,
+              7586.239
+            ],
+            "frame_sizes_bytes": [
+              125505,
+              125143,
+              125320,
+              125338,
+              125417,
+              125278,
+              125516,
+              125326,
+              125663,
+              125004,
+              125482,
+              125269,
+              125279,
+              125402,
+              125032
+            ],
+            "status": 200,
+            "first_complete_frame_ms": 1079.749,
+            "interarrival_ms": {
+              "n": 14,
+              "min": 128.403,
+              "p50": 490.552,
+              "p95": 537.252,
+              "max": 545.148
+            },
+            "received_fps": 2.152,
+            "duration_ms": 7586.387
+          }
+        ],
+        "summary": {
+          "successful": 8,
+          "errors": 0,
+          "http_roundtrip_ms": {
+            "n": 8,
+            "min": 540.28,
+            "p50": 646.646,
+            "p95": 727.797,
+            "max": 743.424
+          },
+          "server_state_age_ms": {
+            "n": 8,
+            "min": 11.083,
+            "p50": 31.985,
+            "p95": 43.988,
+            "max": 44.96
+          },
+          "responses_over_ui_1800ms": 0,
+          "responses_over_lease_1500ms": 0
+        }
+      }
+    }
+  }
+}

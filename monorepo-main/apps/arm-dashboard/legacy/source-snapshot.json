@@ -1,0 +1,17 @@
+{
+  "captured_on": "2026-11-03",
+  "host": "ramion-server-01",
+  "source_directory": "/home/kwikiel/ramion-dashboard",
+  "sha256": {
+    "index.html": "d73c137f20d9d1d4ccb1a142e55d5d2537aa9fd11bd9fde079799dd44a41fe01",
+    "server.py": "118c5e1d8dfc43c1933698ef9ed04df92958da8b7c34579077c1fa8e3711ed5c",
+    "board-map.html": "035773e9b848c8b7722ea677f977bd8a78285080471813c674acac9be222eb8a",
+    "board-map.js": "1ba7027b46a2db6bcecbdfb1be04f96498a2f5698b735b6835e6ba8006c828ac",
+    "scan.html": "fe852273875bb9e1e6f025c7beb71e847edbf3de3ed3b837ab4782d633811d76",
+    "scan_manager.py": "86cbddda9bd6f080eca372eef9579709a9f0fcef617cd00c2b331372a373b370",
+    "scan_worker.py": "814a6a863cd63f1c2f443fd0b690b0c9c7e982c65a4aa0bc58cd37562598182d",
+    "requirements-scan.txt": "beb40ce5728512c13e5219454d5100e0b81a10881f2e347bb986bbe2230d4d2a"
+  },
+  "updated_on": "2026-11-03",
+  "change": "Automatic bounded camera collection with candidate planar registration; manual corner selection is optional."
+}

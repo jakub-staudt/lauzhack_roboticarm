@@ -1,0 +1,1185 @@
+{
+  "measured_at_utc": "2026-11-03T11:30:27.230427+00:00",
+  "method": "Sequential GET /api/state with fresh HTTP connections; read-only. Optional two continuous MJPEG streams. No POSTs, physical movement, browser rendering or sensor timestamps.",
+  "samples_per_phase": 15,
+  "interval_after_response_s": 0.3,
+  "targets": {
+    "http://127.0.0.1:8780": {
+      "baseline": {
+        "started_utc": "2026-11-03T11:30:27.230576+00:00",
+        "streams_requested": false,
+        "samples": [
+          {
+            "elapsed_ms": 697.007,
+            "headers_ms": 693.951,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65313,
+            "server_state_age_ms": 10.713,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 30.81493928165093,
+                "server_frame_age_ms": 5.933
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 24.636524422458304,
+                "server_frame_age_ms": 30.821
+              }
+            }
+          },
+          {
+            "elapsed_ms": 783.217,
+            "headers_ms": 648.926,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65332,
+            "server_state_age_ms": 17.052,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 47.33173721457645,
+                "server_frame_age_ms": 12.542
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 40.75136386460147,
+                "server_frame_age_ms": 14.017
+              }
+            }
+          },
+          {
+            "elapsed_ms": 526.735,
+            "headers_ms": 513.398,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65351,
+            "server_state_age_ms": 9.718,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 27.70235964235725,
+                "server_frame_age_ms": 19.801
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.475716619867267,
+                "server_frame_age_ms": 4.594
+              }
+            }
+          },
+          {
+            "elapsed_ms": 528.851,
+            "headers_ms": 522.934,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65367,
+            "server_state_age_ms": 41.157,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 31.3370592484426,
+                "server_frame_age_ms": 24.741
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 30.337382333641322,
+                "server_frame_age_ms": 24.567
+              }
+            }
+          },
+          {
+            "elapsed_ms": 521.828,
+            "headers_ms": 513.256,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65384,
+            "server_state_age_ms": 15.525,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 29.408133668048073,
+                "server_frame_age_ms": 22.47
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 30.397512220170253,
+                "server_frame_age_ms": 3.02
+              }
+            }
+          },
+          {
+            "elapsed_ms": 517.946,
+            "headers_ms": 511.925,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65400,
+            "server_state_age_ms": 36.294,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 27.30439093403259,
+                "server_frame_age_ms": 12.965
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.522245956494185,
+                "server_frame_age_ms": 9.847
+              }
+            }
+          },
+          {
+            "elapsed_ms": 786.493,
+            "headers_ms": 786.07,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65419,
+            "server_state_age_ms": 43.525,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 31.196746178930262,
+                "server_frame_age_ms": 11.826
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 29.045609768138558,
+                "server_frame_age_ms": 22.207
+              }
+            }
+          },
+          {
+            "elapsed_ms": 789.73,
+            "headers_ms": 789.068,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65441,
+            "server_state_age_ms": 19.235,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 41.367339492504335,
+                "server_frame_age_ms": 4.159
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.84499481965292,
+                "server_frame_age_ms": 16.376
+              }
+            }
+          },
+          {
+            "elapsed_ms": 731.187,
+            "headers_ms": 724.691,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65463,
+            "server_state_age_ms": 36.68,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 24.90658598126849,
+                "server_frame_age_ms": 17.393
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.393959490823722,
+                "server_frame_age_ms": 16.718
+              }
+            }
+          },
+          {
+            "elapsed_ms": 1047.605,
+            "headers_ms": 1047.021,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65489,
+            "server_state_age_ms": 1.536,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 28.021957222359326,
+                "server_frame_age_ms": 29.147
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 31.27309029040583,
+                "server_frame_age_ms": 33.173
+              }
+            }
+          },
+          {
+            "elapsed_ms": 920.154,
+            "headers_ms": 919.737,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65513,
+            "server_state_age_ms": 19.093,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 36.88040867053026,
+                "server_frame_age_ms": 30.053
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 38.533278531607294,
+                "server_frame_age_ms": 8.551
+              }
+            }
+          },
+          {
+            "elapsed_ms": 1028.4,
+            "headers_ms": 939.651,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65539,
+            "server_state_age_ms": 15.826,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 31.1195778494596,
+                "server_frame_age_ms": 30.228
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.594685508045924,
+                "server_frame_age_ms": 8.698
+              }
+            }
+          },
+          {
+            "elapsed_ms": 1042.857,
+            "headers_ms": 956.482,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65565,
+            "server_state_age_ms": 22.388,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 31.53028352765308,
+                "server_frame_age_ms": 11.865
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.7283027817918,
+                "server_frame_age_ms": 29.932
+              }
+            }
+          },
+          {
+            "elapsed_ms": 1824.962,
+            "headers_ms": 1824.574,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65599,
+            "server_state_age_ms": 12.946,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 31.114949449370915,
+                "server_frame_age_ms": 14.802
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 31.711203783218334,
+                "server_frame_age_ms": 32.717
+              }
+            }
+          },
+          {
+            "elapsed_ms": 1107.014,
+            "headers_ms": 891.762,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65632,
+            "server_state_age_ms": 18.465,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 26.59755204121129,
+                "server_frame_age_ms": 19.602
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 31.724320224274944,
+                "server_frame_age_ms": 4.228
+              }
+            }
+          }
+        ],
+        "cameras": [],
+        "summary": {
+          "successful": 15,
+          "errors": 0,
+          "http_roundtrip_ms": {
+            "n": 15,
+            "min": 517.946,
+            "p50": 786.493,
+            "p95": 1322.398,
+            "max": 1824.962
+          },
+          "server_state_age_ms": {
+            "n": 15,
+            "min": 1.536,
+            "p50": 18.465,
+            "p95": 41.867,
+            "max": 43.525
+          },
+          "responses_over_ui_1800ms": 1,
+          "responses_over_lease_1500ms": 1
+        }
+      },
+      "two_cameras": {
+        "started_utc": "2026-11-03T11:30:44.327419+00:00",
+        "streams_requested": true,
+        "samples": [
+          {
+            "elapsed_ms": 2549.338,
+            "headers_ms": 2497.507,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 65663,
+            "server_state_age_ms": 16.227,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 31.584940525988895,
+                "server_frame_age_ms": 13.901
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 31.570925364232902,
+                "server_frame_age_ms": 30.241
+              }
+            }
+          },
+          {
+            "elapsed_ms": 10001.799,
+            "error": "timed out"
+          },
+          {
+            "elapsed_ms": 10002.348,
+            "error": "timed out"
+          },
+          {
+            "elapsed_ms": 10002.381,
+            "error": "timed out"
+          },
+          {
+            "elapsed_ms": 10002.587,
+            "error": "timed out"
+          },
+          {
+            "elapsed_ms": 8745.975,
+            "headers_ms": 8745.602,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 66651,
+            "server_state_age_ms": 0.215,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 30.4829034496937,
+                "server_frame_age_ms": 4.702
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 37.06672474161921,
+                "server_frame_age_ms": 31.107
+              }
+            }
+          },
+          {
+            "elapsed_ms": 772.523,
+            "headers_ms": 732.039,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 66714,
+            "server_state_age_ms": 38.508,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 27.7634996312417,
+                "server_frame_age_ms": 4.539
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 23.381099673564343,
+                "server_frame_age_ms": 31.075
+              }
+            }
+          },
+          {
+            "elapsed_ms": 766.055,
+            "headers_ms": 677.844,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 66735,
+            "server_state_age_ms": 4.414,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 31.235971142637414,
+                "server_frame_age_ms": 29.59
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 31.167912482113984,
+                "server_frame_age_ms": 33.985
+              }
+            }
+          },
+          {
+            "elapsed_ms": 696.914,
+            "headers_ms": 662.086,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 66756,
+            "server_state_age_ms": 7.628,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 27.72054025069884,
+                "server_frame_age_ms": 21.384
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 27.715863615928807,
+                "server_frame_age_ms": 2.42
+              }
+            }
+          },
+          {
+            "elapsed_ms": 804.651,
+            "headers_ms": 792.864,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 66778,
+            "server_state_age_ms": 34.676,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 25.439916577228654,
+                "server_frame_age_ms": 23.654
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 29.736383686066088,
+                "server_frame_age_ms": 14.946
+              }
+            }
+          },
+          {
+            "elapsed_ms": 784.54,
+            "headers_ms": 776.661,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 66800,
+            "server_state_age_ms": 0.589,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 31.30654451039398,
+                "server_frame_age_ms": 1.85
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 30.162266663757368,
+                "server_frame_age_ms": 2.077
+              }
+            }
+          },
+          {
+            "elapsed_ms": 704.246,
+            "headers_ms": 697.569,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 66819,
+            "server_state_age_ms": 47.516,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 29.00246065827457,
+                "server_frame_age_ms": 2.004
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 25.752868367850446,
+                "server_frame_age_ms": 14.19
+              }
+            }
+          },
+          {
+            "elapsed_ms": 828.93,
+            "headers_ms": 826.854,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 66842,
+            "server_state_age_ms": 15.683,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 24.444467095667676,
+                "server_frame_age_ms": 27.954
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 21.582211336759798,
+                "server_frame_age_ms": 15.143
+              }
+            }
+          },
+          {
+            "elapsed_ms": 749.472,
+            "headers_ms": 663.334,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 66862,
+            "server_state_age_ms": 6.649,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 24.375480089811713,
+                "server_frame_age_ms": 24.872
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 20.869609930055038,
+                "server_frame_age_ms": 22.841
+              }
+            }
+          },
+          {
+            "elapsed_ms": 801.542,
+            "headers_ms": 676.023,
+            "status": 200,
+            "connected": true,
+            "loop_ok": true,
+            "loop_hz": 20,
+            "sequence": 66883,
+            "server_state_age_ms": 49.205,
+            "cameras": {
+              "overhead": {
+                "status": "live",
+                "fps": 35.22129327329973,
+                "server_frame_age_ms": 31.341
+              },
+              "wrist": {
+                "status": "live",
+                "fps": 30.18885422990643,
+                "server_frame_age_ms": 12.409
+              }
+            }
+          }
+        ],
+        "cameras": [
+          {
+            "name": "overhead",
+            "frame_receive_times_ms": [
+              2499.012,
+              4862.354,
+              6400.209,
+              7683.455,
+              8654.129,
+              8986.59,
+              9658.962,
+              10502.214,
+              11072.437,
+              11471.349,
+              12020.977,
+              12480.451,
+              13045.437,
+              13613.997,
+              14235.517,
+              14716.021,
+              15311.419,
+              15767.479,
+              16585.123,
+              16881.254,
+              18120.029,
+              18633.734,
+              19046.468,
+              19340.726,
+              19717.347,
+              20196.033,
+              20678.516,
+              21258.642,
+              21755.369,
+              22475.902,
+              22948.216,
+              23225.346,
+              23678.407,
+              24097.423,
+              24802.327,
+              25212.789,
+              25966.435,
+              26111.764,
+              26592.352,
+              27114.678,
+              27401.163,
+              27761.988,
+              28227.56,
+              28664.682,
+              28994.533,
+              29437.391,
+              30277.765,
+              31127.896,
+              32141.739,
+              32900.925,
+              33531.488,
+              34552.345,
+              35188.431,
+              36089.622,
+              37044.041,
+              38119.88,
+              39142.543,
+              40020.96,
+              41053.959,
+              42287.507,
+              42873.394,
+              43860.488,
+              44187.432,
+              44734.708,
+              45958.369,
+              46062.611,
+              46331.251,
+              46580.974,
+              47005.456,
+              47333.852,
+              47579.705,
+              48102.63,
+              48382.829,
+              48509.246,
+              48748.299,
+              49087.732,
+              49241.111,
+              49478.23,
+              49807.409,
+              50011.398,
+              50323.072,
+              50480.182,
+              50611.229,
+              50966.603,
+              51014.067,
+              51163.753,
+              51304.196,
+              51507.21,
+              51641.521,
+              51700.882,
+              51830.552,
+              51966.801,
+              52025.145,
+              52099.584,
+              52291.997,
+              52339.721,
+              52431.473,
+              52543.215,
+              52699.97,
+              52824.301,
+              53001.593,
+              53142.097,
+              53298.204,
+              53420.011,
+              53522.679,
+              53745.038,
+              54247.717,
+              54703.904,
+              55275.449,
+              55704.974,
+              56242.61,
+              56750.226,
+              57213.02,
+              57781.377,
+              58261.745,
+              58705.838,
+              59260.449,
+              59712.496,
+              60293.177,
+              60760.139,
+              61216.077,
+              61790.861,
+              62262.072,
+              62710.162
+            ],
+            "frame_sizes_bytes": [
+              108752,
+              109156,
+              109126,
+              108697,
+              109026,
+              109111,
+              108874,
+              108929,
+              108788,
+              109223,
+              108776,
+              109011,
+              109008,
+              109245,
+              108614,
+              109101,
+              108966,
+              108848,
+              108945,
+              108714,
+              108931,
+              108971,
+              109019,
+              108965,
+              109073,
+              109269,
+              108889,
+              108930,
+              108932,
+              108543,
+              108743,
+              109098,
+              108903,
+              108934,
+              108750,
+              108880,
+              109183,
+              108925,
+              108610,
+              109290,
+              109009,
+              108942,
+              109180,
+              109176,
+              108742,
+              108885,
+              109038,
+              108926,
+              108885,
+              108920,
+              108906,
+              109191,
+              109011,
+              108732,
+              108660,
+              109066,
+              109000,
+              108678,
+              108798,
+              109021,
+              109056,
+              109110,
+              108992,
+              108607,
+              108654,
+              108874,
+              108873,
+              109245,
+              108983,
+              108770,
+              108668,
+              108880,
+              109329,
+              108837,
+              109089,
+              109200,
+              108650,
+              108387,
+              109215,
+              109225,
+              108962,
+              108822,
+              108791,
+              109011,
+              109011,
+              108893,
+              109100,
+              108620,
+              108359,
+              109023,
+              109096,
+              109296,
+              108723,
+              108964,
+              108729,
+              109051,
+              109225,
+              108658,
+              108737,
+              108884,
+              108607,
+              108840,
+              109060,
+              108904,
+              109037,
+              109121,
+              108527,
+              109314,
+              108698,
+              108842,
+              108690,
+              109077,
+              108834,
+              108982,
+              108864,
+              108977,
+              108930,
+              108731,
+              109072,
+              108845,
+              109144,
+              108807,
+              109050,
+              109013
+            ],
+            "status": 200,
+            "first_complete_frame_ms": 2499.012,
+            "interarrival_ms": {
+              "n": 123,
+              "min": 47.464,
+              "p50": 455.938,
+              "p95": 1071.555,
+              "max": 2363.342
+            },
+            "received_fps": 2.043,
+            "duration_ms": 62710.612
+          },
+          {
+            "name": "wrist",
+            "frame_receive_times_ms": [
+              3246.696,
+              4190.933,
+              5768.119,
+              7311.408,
+              8275.195,
+              9328.589,
+              10301.153,
+              10637.263,
+              11203.741,
+              11736.102,
+              12313.311,
+              12881.345,
+              13345.729,
+              13902.422,
+              14455.486,
+              15007.593,
+              15602.838,
+              16074.413,
+              16442.711,
+              17498.27,
+              18330.64,
+              18881.367,
+              19219.546,
+              19486.623,
+              19966.295,
+              20514.416,
+              20988.054,
+              21528.405,
+              22046.345,
+              22343.121,
+              22833.798,
+              23407.783,
+              23926.721,
+              24362.997,
+              24667.063,
+              25307.928,
+              25973.012,
+              26220.477,
+              26517.244,
+              27255.348,
+              27570.418,
+              27974.276,
+              28364.388,
+              28835.342,
+              29267.366,
+              29702.697,
+              30498.569,
+              31283.724,
+              31948.994,
+              32736.873,
+              33720.456,
+              34658.74,
+              35479.392,
+              36567.08,
+              37308.155,
+              38418.351,
+              39358.775,
+              40189.201,
+              41295.538,
+              42504.523,
+              43148.529,
+              43669.709,
+              44383.5,
+              44907.936,
+              45258.682,
+              46159.694,
+              46483.645,
+              46699.087,
+              47332.894,
+              48149.404,
+              48556.104,
+              48905.645,
+              49144.151,
+              49274.801,
+              49563.434,
+              49955.934,
+              50039.733,
+              50281.033,
+              50506.0,
+              50731.716,
+              50837.679,
+              51112.767,
+              51231.234,
+              51407.028,
+              51589.731,
+              51801.382,
+              51996.502,
+              52173.692,
+              52252.128,
+              52362.726,
+              52496.888,
+              52638.466,
+              52690.529,
+              52728.666,
+              52846.876,
+              52879.155,
+              52937.177,
+              53016.663,
+              53046.824,
+              53157.424,
+              53186.752,
+              53211.162,
+              53321.595,
+              53433.212,
+              53501.453,
+              53768.32,
+              54272.865,
+              54837.431,
+              55258.864,
+              55838.656,
+              56373.147,
+              56786.566,
+              57273.949,
+              57759.906,
+              58286.687,
+              58837.554,
+              59348.326,
+              59884.944,
+              60307.098,
+              60829.256,
+              61276.187,
+              61807.218,
+              62335.513,
+              62777.133
+            ],
+            "frame_sizes_bytes": [
+              125599,
+              125594,
+              125442,
+              125193,
+              125405,
+              125069,
+              125399,
+              125240,
+              125379,
+              125445,
+              125214,
+              125197,
+              125254,
+              125358,
+              125415,
+              125282,
+              125460,
+              125227,
+              125411,
+              125406,
+              125377,
+              125074,
+              125299,
+              125016,
+              125370,
+              125255,
+              125341,
+              125340,
+              125315,
+              125386,
+              125502,
+              125593,
+              125120,
+              125510,
+              125284,
+              125376,
+              125204,
+              125524,
+              125187,
+              125263,
+              125485,
+              125422,
+              125080,
+              125420,
+              125316,
+              125261,
+              124918,
+              125307,
+              125389,
+              125143,
+              125265,
+              125735,
+              125495,
+              125354,
+              125119,
+              125256,
+              125401,
+              125191,
+              125321,
+              125306,
+              125314,
+              125302,
+              125494,
+              125457,
+              125505,
+              125367,
+              125118,
+              125117,
+              125158,
+              125331,
+              125315,
+              125328,
+              125444,
+              125145,
+              125134,
+              125160,
+              125459,
+              125372,
+              125575,
+              125408,
+              125418,
+              125358,
+              125433,
+              125228,
+              125347,
+              125090,
+              125316,
+              125463,
+              125152,
+              125464,
+              125358,
+              125127,
+              125267,
+              125295,
+              125400,
+              125543,
+              125513,
+              125351,
+              125412,
+              125238,
+              125417,
+              125413,
+              125521,
+              125193,
+              125477,
+              125310,
+              125526,
+              125245,
+              125591,
+              124986,
+              125214,
+              125120,
+              124996,
+              125467,
+              125237,
+              125307,
+              125089,
+              125356,
+              125444,
+              125233,
+              125234,
+              125236,
+              125098,
+              125192
+            ],
+            "status": 200,
+            "first_complete_frame_ms": 3246.696,
+            "interarrival_ms": {
+              "n": 123,
+              "min": 24.41,
+              "p50": 473.638,
+              "p95": 1055.342,
+              "max": 1577.186
+            },
+            "received_fps": 2.066,
+            "duration_ms": 62777.281
+          }
+        ],
+        "summary": {
+          "successful": 11,
+          "errors": 4,
+          "http_roundtrip_ms": {
+            "n": 11,
+            "min": 696.914,
+            "p50": 784.54,
+            "p95": 5647.657,
+            "max": 8745.975
+          },
+          "server_state_age_ms": {
+            "n": 11,
+            "min": 0.215,
+            "p50": 15.683,
+            "p95": 48.361,
+            "max": 49.205
+          },
+          "responses_over_ui_1800ms": 6,
+          "responses_over_lease_1500ms": 6
+        }
+      }
+    }
+  }
+}

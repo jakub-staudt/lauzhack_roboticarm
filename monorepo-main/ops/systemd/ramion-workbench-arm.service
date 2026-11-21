@@ -1,0 +1,23 @@
+[Unit]
+Description=RAMION workbench - explicitly started arm control
+Wants=network-online.target tailscaled.service
+After=network-online.target tailscaled.service ramion-workbench-preview.service
+Conflicts=ramion-workbench-preview.service
+OnFailure=ramion-workbench-preview.service
+
+[Service]
+Type=exec
+User=ramion-workbench
+Group=ramion-workbench
+SupplementaryGroups=video dialout
+WorkingDirectory=/srv/ramion/current/arm-workbench
+EnvironmentFile=/etc/ramion/workbench.env
+StateDirectory=ramion/workbench
+StateDirectoryMode=0700
+ExecStartPre=/usr/bin/test -s /var/lib/ramion/workbench/emergency-stop.json
+ExecStart=/usr/bin/env RAMION_STOP_STATE_FILE=/var/lib/ramion/workbench/emergency-stop.json /bin/bash /srv/ramion/current/arm-workbench/ops/linux/launch-workbench.sh --arm
+Restart=no
+KillSignal=SIGINT
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true

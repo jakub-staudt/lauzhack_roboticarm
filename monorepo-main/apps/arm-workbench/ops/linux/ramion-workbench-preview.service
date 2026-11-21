@@ -1,0 +1,19 @@
+[Unit]
+Description=RAMION workbench - cameras and disconnected preview
+Conflicts=ramion-workbench-arm.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/apps/ramion-workbench/src
+EnvironmentFile=-%h/.config/ramion/workbench.env
+ExecStart=/bin/bash %h/apps/ramion-workbench/src/ops/linux/launch-workbench.sh --preview
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

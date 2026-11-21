@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1180" viewBox="0 0 1280 1180" role="img" aria-labelledby="title description">
+<title id="title">Ramion — from interface to physics</title>
+<desc id="description">Five logical layers, top to bottom: browser UI; HTTP API and camera streams; the 20 Hz control service; USB serial drivers; mechanical and electrical hardware. Commands travel down toward hardware and feedback travels up toward the UI. The dashboard serves the operator UI. The controller API and control loop run in the soarm-panel process.</desc>
+<defs>
+ <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#101b21"/><stop offset="1" stop-color="#0b1115"/></linearGradient>
+ <linearGradient id="card" x2="1" y2="0"><stop stop-color="#19262d"/><stop offset="1" stop-color="#131e24"/></linearGradient>
+ <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#a3d1d4" stroke-opacity=".035"/></pattern>
+ <marker id="arrowMint" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="m1 1 5 3-5 3" fill="none" stroke="#b9f28b" stroke-width="1.5"/></marker>
+ <marker id="arrowBlue" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="m1 1 5 3-5 3" fill="none" stroke="#80cdeb" stroke-width="1.5"/></marker>
+ <style>text{font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif} .label{font-size:12px;font-weight:700;letter-spacing:2px}.body{font-size:16px;fill:#b0c1c8}.mono{font-family:'SFMono-Regular',Consolas,monospace;font-size:13px;fill:#c4d2d8}.heading{font-size:25px;font-weight:650;fill:#f1f6f7}.sub{font-size:13px;fill:#8fa5af}</style>
+</defs>
+<rect width="1280" height="1180" rx="24" fill="url(#bg)"/>
+<rect width="1280" height="1180" rx="24" fill="url(#grid)"/>
+<path d="M48 48h28" stroke="#b9f28b" stroke-width="5" stroke-linecap="round"/>
+<text x="90" y="53" class="label" fill="#b9f28b">RAMION / SYSTEM ARCHITECTURE</text>
+<text x="48" y="110" font-size="44" font-weight="700" fill="#f1f6f7" letter-spacing="-1.6">From interface to physics.</text>
+<text x="49" y="144" class="body">One arm. Five layers. A continuous loop between action and feedback.</text>
+<g transform="translate(1090 43)" fill="none" stroke="#b9f28b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+<path d="M0 85h95M17 85V70h45v15M40 69 17 40 53 10l35 24-17 24m17-24 17-5 12 15-15 13-14-9"/>
+<circle cx="17" cy="40" r="7" fill="#101b21"/><circle cx="53" cy="10" r="7" fill="#101b21"/><circle cx="88" cy="34" r="6" fill="#101b21"/>
+</g>
+
+<path d="M72 228v664" stroke="#30434d" stroke-dasharray="3 8"/>
+<g transform="translate(0 -708)">
+<rect x="124" y="900" width="1032" height="130" rx="16" fill="url(#card)" stroke="#30434d"/>
+<rect x="124" y="923" width="4" height="84" rx="2" fill="#f0bd72"/>
+<circle cx="72" cy="936" r="21" fill="#142128" stroke="#f0bd72" stroke-opacity=".55"/>
+<text x="61" y="941" class="mono" fill="#f0bd72">05</text>
+<text x="152" y="941" class="heading" >UI layer</text>
+<text x="1128" y="939" class="label" fill="#f0bd72" text-anchor="end">BROWSER</text>
+<text x="152" y="976" class="body" >Live cameras · measured joint feedback · jog / target controls · STOP</text>
+<rect x="152" y="989" width="294" height="28" rx="7" fill="#f0bd72" fill-opacity=".07" stroke="#f0bd72" stroke-opacity=".22"/>
+<text x="164" y="1008" class="mono" >arm-dashboard · proxy :8780</text>
+<rect x="458" y="989" width="278" height="28" rx="7" fill="#f0bd72" fill-opacity=".07" stroke="#f0bd72" stroke-opacity=".22"/>
+<text x="470" y="1008" class="mono" >built-in panel · soarm :8765</text>
+</g>
+<path d="M605 348v-21" stroke="#80cdeb" stroke-width="1.5" marker-end="url(#arrowBlue)"/><path d="M635 327v21" stroke="#b9f28b" stroke-width="1.5" marker-end="url(#arrowMint)"/>
+<text x="658" y="342" class="sub">HTTP requests / telemetry + video</text>
+<g transform="translate(0 -376)">
+<rect x="124" y="734" width="1032" height="130" rx="16" fill="url(#card)" stroke="#30434d"/>
+<rect x="124" y="757" width="4" height="84" rx="2" fill="#a9a2f5"/>
+<circle cx="72" cy="770" r="21" fill="#142128" stroke="#a9a2f5" stroke-opacity=".55"/>
+<text x="61" y="775" class="mono" fill="#a9a2f5">04</text>
+<text x="152" y="775" class="heading" >Web API layer</text>
+<text x="1128" y="773" class="label" fill="#a9a2f5" text-anchor="end">HTTP + STREAMS</text>
+<text x="152" y="810" class="body" >State and control endpoints · two MJPEG camera streams</text>
+<rect x="152" y="823" width="272" height="28" rx="7" fill="#a9a2f5" fill-opacity=".07" stroke="#a9a2f5" stroke-opacity=".22"/>
+<text x="164" y="842" class="mono" >GET /api/state · POST /api/…</text>
+<rect x="436" y="823" width="216" height="28" rx="7" fill="#a9a2f5" fill-opacity=".07" stroke="#a9a2f5" stroke-opacity=".22"/>
+<text x="448" y="842" class="mono" >/cameras/{name}.mjpg</text>
+<rect x="664" y="823" width="98" height="28" rx="7" fill="#a9a2f5" fill-opacity=".07" stroke="#a9a2f5" stroke-opacity=".22"/>
+<text x="676" y="842" class="mono" >:8765</text>
+</g>
+<path d="M605 514v-21" stroke="#80cdeb" stroke-width="1.5" marker-end="url(#arrowBlue)"/><path d="M635 493v21" stroke="#b9f28b" stroke-width="1.5" marker-end="url(#arrowMint)"/>
+<text x="658" y="508" class="sub">commands / cached telemetry</text>
+<g transform="translate(0 -44)">
+<rect x="124" y="568" width="1032" height="130" rx="16" fill="url(#card)" stroke="#30434d"/>
+<rect x="124" y="591" width="4" height="84" rx="2" fill="#b9f28b"/>
+<circle cx="72" cy="604" r="21" fill="#142128" stroke="#b9f28b" stroke-opacity=".55"/>
+<text x="61" y="609" class="mono" fill="#b9f28b">03</text>
+<text x="152" y="609" class="heading" >Control service</text>
+<text x="1128" y="607" class="label" fill="#b9f28b" text-anchor="end">RUNTIME</text>
+<text x="152" y="644" class="body" >20 Hz loop · joint limits · control ownership · heartbeat · STOP / hold</text>
+<rect x="152" y="657" width="294" height="28" rx="7" fill="#b9f28b" fill-opacity=".07" stroke="#b9f28b" stroke-opacity=".22"/>
+<text x="164" y="676" class="mono" >panel.py · PanelController</text>
+<rect x="458" y="657" width="193" height="28" rx="7" fill="#b9f28b" fill-opacity=".07" stroke="#b9f28b" stroke-opacity=".22"/>
+<text x="470" y="676" class="mono" >soarm-panel process</text>
+</g>
+<path d="M605 680v-21" stroke="#80cdeb" stroke-width="1.5" marker-end="url(#arrowBlue)"/><path d="M635 659v21" stroke="#b9f28b" stroke-width="1.5" marker-end="url(#arrowMint)"/>
+<text x="658" y="674" class="sub">targets / measured state</text>
+<g transform="translate(0 288)">
+<rect x="124" y="402" width="1032" height="130" rx="16" fill="url(#card)" stroke="#30434d"/>
+<rect x="124" y="425" width="4" height="84" rx="2" fill="#80cdeb"/>
+<circle cx="72" cy="438" r="21" fill="#142128" stroke="#80cdeb" stroke-opacity=".55"/>
+<text x="61" y="443" class="mono" fill="#80cdeb">02</text>
+<text x="152" y="443" class="heading" >Drivers layer</text>
+<text x="1128" y="441" class="label" fill="#80cdeb" text-anchor="end">DEVICE I/O</text>
+<text x="152" y="478" class="body" >USB → serial → Feetech bus · servo commands and measured positions</text>
+<rect x="152" y="491" width="146" height="28" rx="7" fill="#80cdeb" fill-opacity=".07" stroke="#80cdeb" stroke-opacity=".22"/>
+<text x="164" y="510" class="mono" >soarm/feetech.py</text>
+<rect x="310" y="491" width="108" height="28" rx="7" fill="#80cdeb" fill-opacity=".07" stroke="#80cdeb" stroke-opacity=".22"/>
+<text x="322" y="510" class="mono" >pyserial</text>
+<rect x="430" y="491" width="302" height="28" rx="7" fill="#80cdeb" fill-opacity=".07" stroke="#80cdeb" stroke-opacity=".22"/>
+<text x="442" y="510" class="mono" >panel_cameras.py · OpenCV</text>
+</g>
+<path d="M605 846v-21" stroke="#80cdeb" stroke-width="1.5" marker-end="url(#arrowBlue)"/><path d="M635 825v21" stroke="#b9f28b" stroke-width="1.5" marker-end="url(#arrowMint)"/>
+<text x="658" y="840" class="sub">serial packets / USB camera frames</text>
+<g transform="translate(0 664)">
+<rect x="124" y="192" width="1032" height="174" rx="16" fill="url(#card)" stroke="#30434d"/>
+<rect x="124" y="215" width="4" height="128" rx="2" fill="#d9b38c"/>
+<circle cx="72" cy="228" r="21" fill="#142128" stroke="#d9b38c" stroke-opacity=".55"/>
+<text x="61" y="233" class="mono" fill="#d9b38c">01</text>
+<text x="152" y="233" class="heading" >Hardware / physics</text>
+<text x="1128" y="231" class="label" fill="#d9b38c" text-anchor="end">PHYSICAL WORLD</text>
+<path d="M635 254v87" stroke="#30434d"/>
+<text x="152" y="279" class="label" fill="#d9b38c">MECHANICAL</text>
+<text x="152" y="309" class="body" >SO-101 · links, joints and gripper</text>
+<text x="152" y="337" class="sub" >Motion, geometry and mechanical limits</text>
+<text x="660" y="279" class="label" fill="#d9b38c">ELECTRICAL</text>
+<text x="660" y="309" class="body" >STS3215 servos · power · USB serial adapter</text>
+<text x="660" y="337" class="sub" >Overhead + wrist cameras on USB</text>
+</g>
+<path d="M48 1062h1184" stroke="#30434d"/>
+<path d="M64 1103v-24" stroke="#80cdeb" stroke-width="2" marker-end="url(#arrowBlue)"/>
+<text x="90" y="1096" class="sub" >Feedback ↑ UI</text>
+<path d="M261 1079v24" stroke="#b9f28b" stroke-width="2" marker-end="url(#arrowMint)"/>
+<text x="292" y="1096" class="sub" >Commands ↓ hardware</text>
+<text x="1230" y="1096" class="label" fill="#8fa5af" text-anchor="end">LOGICAL LAYERS · NOT SEPARATE MICROSERVICES</text>
+<text x="48" y="1135" class="sub" >Service + API share the soarm-panel process. The custom dashboard adds an HTTP proxy; cameras feed the API alongside servo telemetry.</text>
+</svg>

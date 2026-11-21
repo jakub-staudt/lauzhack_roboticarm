@@ -1,0 +1,23 @@
+[Unit]
+Description=RAMION camera and arm dashboard
+Wants=network-online.target tailscaled.service
+After=network-online.target tailscaled.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+User=ramion-dashboard
+Group=ramion-dashboard
+WorkingDirectory=/srv/ramion/current/arm-dashboard
+EnvironmentFile=/etc/ramion/dashboard.env
+StateDirectory=ramion/scans
+StateDirectoryMode=0700
+ExecStart=/usr/bin/env RAMION_DASHBOARD_SCAN__STORAGE_DIR=/var/lib/ramion/scans /srv/ramion/current/arm-dashboard/.venv/bin/arm-dashboard
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,22 @@
+[Unit]
+Description=Ramion camera and arm dashboard
+After=network-online.target
+
+[Service]
+WorkingDirectory=/home/kwikiel/ramion-dashboard
+# Host settings: bind address, upstream URLs, scan storage (template: deploy/ramion-dashboard.env).
+# Required on purpose: without it the FastAPI dashboard would listen on 127.0.0.1 only.
+EnvironmentFile=/home/kwikiel/.config/ramion/dashboard.env
+# While legacy releases exist on the server, a release is either the FastAPI app
+# (.venv/bin/arm-dashboard) or the legacy stdlib proxy (server.py). One unit starts both, so a
+# rollback to a legacy release works without touching this file. The FastAPI app always runs
+# as one process: scan state is in memory.
+ExecStart=/bin/sh -c 'if [ -x .venv/bin/arm-dashboard ]; then exec .venv/bin/arm-dashboard; else exec /usr/bin/python3 server.py; fi'
+Restart=on-failure
+RestartSec=3
+# SIGTERM: uvicorn finishes open requests and the lifespan stops a running scan collector.
+TimeoutStopSec=15
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=RAMION workbench - explicitly started arm control
+Conflicts=ramion-workbench-preview.service
+After=ramion-workbench-preview.service
+OnFailure=ramion-workbench-preview.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/apps/ramion-workbench/src
+EnvironmentFile=%h/.config/ramion/workbench.env
+ExecStart=/bin/bash %h/apps/ramion-workbench/src/ops/linux/launch-workbench.sh --arm
+Restart=no
+KillSignal=SIGINT
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true

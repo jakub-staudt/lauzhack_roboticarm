@@ -1,0 +1,76 @@
+{
+  "kind": "so101_overhead_32x32_right",
+  "source_repository": "https://github.com/TheRobotStudio/SO-ARM100",
+  "source_commit": "a758567c3978dfeefe282ede0500085a48fe8f78",
+  "license": "Apache-2.0",
+  "guide_url": "https://github.com/TheRobotStudio/SO-ARM100/blob/a758567c3978dfeefe282ede0500085a48fe8f78/Optional/Overhead_Cam_Mount_32x32_UVC_Module/README.md",
+  "scale_to_m": 0.001,
+  "rotation_wxyz": [
+    0.7071067811865476,
+    0.7071067811865476,
+    0,
+    0
+  ],
+  "table_z_m": -0.0074,
+  "robot_frame": "+X forward, +Y left, +Z up; unchanged SO101 MJCF base frame",
+  "assembly": "Standard fully seated interlocks; camera stand at robot right (-Y); no spacers. User confirmed this assembly.",
+  "registration_evidence": [
+    "Robot base mesh bottom: z=-0.0024m. Arm-base seating pocket: native Y=0mm; bottom: native Y=-5mm. Table therefore z=-0.0074m. Raised perimeter Y=2.2mm is a locating lip, not the seating surface.",
+    "Arm-base front holes: native X=-17.04593086mm, Z=-25.65396881/-81.20696449mm. SO101 front holes: native X=+/-27.77649706mm, Z=62.27499104mm. Existing MJCF maps native Z to world X with -6.365mm translation. Hole centers establish the rigid registration.",
+    "Bottom comb interlock X0..37.4mm mates arm-base X=-93.9209137..-56.5209198mm. Bottom Z=-10..0mm overlaps arm-base end Z=16.0891113..26.0891113mm; bottom foot Y0..7.2mm matches plate Y=-5..2.2mm.",
+    "Middle/top share their native frame. Middle Y35..42.85mm socket mates bottom Y223.1..230.95mm tongue via +188.1mm translation. Centering translations are X=18.7mm, Z=36.513mm. Top socket Y190..197.85mm mates middle tongue in the shared native frame.",
+    "Rendered with the bundled SO101 model to inspect base seating, interlocks and both upright seams. Derived nominal CAD placement; not surveyed camera calibration."
+  ],
+  "limitations": [
+    "Visual environment only; no collision-safety guarantee.",
+    "STL has no units metadata; millimetres established from mounting-hole spacing, 32mm module plate and matching SO101 footprint.",
+    "Camera PCB, lens, wiring, fasteners and clamps are not included in upstream STL parts.",
+    "No robot kinematics, calibration, measured qpos, joint anchors or TCP transforms are changed."
+  ],
+  "assets": [
+    {
+      "file": "arm_base.stl",
+      "blob_sha": "7d6e6ccd195488b7cc61b7b915773c88ba1d3d81",
+      "sha256": "169adfd40bcca689334efd1188c9b42cc03c914dc0afeaa98cb5431013610833",
+      "source_url": "https://github.com/TheRobotStudio/SO-ARM100/blob/a758567c3978dfeefe282ede0500085a48fe8f78/Optional/Overhead_Cam_Mount_32x32_UVC_Module/stl/arm_base.stl",
+      "position_m": [
+        0.0729559219,
+        -0.0534304657,
+        -0.0024
+      ]
+    },
+    {
+      "file": "cam_mount_bottom.stl",
+      "blob_sha": "8000022c6fdb7291148e70e1964f220aae60bce8",
+      "sha256": "b3545b6cae437210e17b7dcfee2e12e00dc7a59ece9264f4b13ab9fd8ceb8088",
+      "source_url": "https://github.com/TheRobotStudio/SO-ARM100/blob/a758567c3978dfeefe282ede0500085a48fe8f78/Optional/Overhead_Cam_Mount_32x32_UVC_Module/stl/cam_mount_bottom.stl",
+      "position_m": [
+        -0.0209649918,
+        -0.079519577,
+        -0.0074
+      ]
+    },
+    {
+      "file": "cam_mount_middle.stl",
+      "blob_sha": "2e97d7d4369315150a8f7388d61f65205a198126",
+      "sha256": "f6f3980df74777f74cf53a4697cbb63e4e000ab53f418de209559214f733f84b",
+      "source_url": "https://github.com/TheRobotStudio/SO-ARM100/blob/a758567c3978dfeefe282ede0500085a48fe8f78/Optional/Overhead_Cam_Mount_32x32_UVC_Module/stl/cam_mount_middle.stl",
+      "position_m": [
+        -0.0022649918,
+        -0.116032577,
+        0.1807
+      ]
+    },
+    {
+      "file": "cam_mount_top.stl",
+      "blob_sha": "a04d2c84bf15e861cd22e808194d0a26643017e8",
+      "sha256": "206762be157918967741eb53665cac796485c4609ac64d4c9444d85c7fcb2c4c",
+      "source_url": "https://github.com/TheRobotStudio/SO-ARM100/blob/a758567c3978dfeefe282ede0500085a48fe8f78/Optional/Overhead_Cam_Mount_32x32_UVC_Module/stl/cam_mount_top.stl",
+      "position_m": [
+        -0.0022649918,
+        -0.116032577,
+        0.1807
+      ]
+    }
+  ]
+}

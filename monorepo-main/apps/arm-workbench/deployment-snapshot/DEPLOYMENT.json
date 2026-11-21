@@ -1,0 +1,31 @@
+{
+  "date": "2026-11-03",
+  "source_commit": "24abbb6f7f16a2fc8ab8a868f99a79d12e1e5c30",
+  "server": "ramion-server-01",
+  "source_directory": "/home/kwiscion/apps/ramion-workbench/src",
+  "url": "http://100.85.56.14:8765/",
+  "tests_passed": 131,
+  "lint": "passed",
+  "typecheck": "passed with deployed Python interpreter",
+  "arm_motion_commands_issued": false,
+  "arm_mode": "manual service; no boot/autorestart",
+  "sha256": {
+    "pyproject.toml": "c0b7da643fff908cc9eeb05c55dc9976d750fda04ea2eaad262cfd85f286f362",
+    "uv.lock": "2def8b7fc2796fa32a1b43953815a7406a7f185ef7c92dcc9e2b76702310f959",
+    "packages/soarm/pyproject.toml": "4e88992f86d3de6038b137bc51479cf0981f9aa1cbbd90b9f403a855be8aabce",
+    "packages/soarm/soarm/panel.py": "c4890b0e774f7b79c950ebd1f8d976edf978477de6070ad7b6801d93cfe210d3",
+    "packages/soarm/soarm/panel.html": "50a71e0079492504de162ff3c31ef9179d19a51c033c1a2e6cfa8c5147034c2a",
+    "packages/soarm/soarm/panel.css": "4bd3128bb6d1cbda8f2867ebbc82e9e3d9795d4dbaf83de0afbb59342c285297",
+    "packages/soarm/soarm/panel.js": "16ee447a07995678f31becf04e3dcb406e6287c6e71f47926f36e60ff0db24ba",
+    "packages/soarm/soarm/panel_cameras.py": "04258e32b7def2ed81fa66f02a31c75ae806ebe79f855c4a1a8f5bf64c8f0ca0",
+    "packages/soarm/soarm/panel_viewer.py": "0d4cdf74fa89b183a3a2fab2a3f738acac2c2edaa86bb23f48deddfef5edcb3d",
+    "packages/soarm/soarm/panel_preview.py": "47ab3a85cf2f639c92669af7fc037457c7fe651c32d5e0a9a85684fb4f269387",
+    "ops/linux/launch-workbench.sh": "806dc849182e53f46f9f72479ef6e1e440acffc6ec684e0b1c04abcd6eee16a0",
+    "ops/linux/ramion-workbench-preview.service": "45f04f142f4471c143c76e0594beff939f2fc11e5c16d1cbde307286aa79a2e0",
+    "ops/linux/ramion-workbench-arm.service": "69e4ba1402f9920a0b3f98ffb36e5fc7c7e855a2c6d3f0cea0fa2641a83c967d",
+    "ops/linux/workbench.env.example": "1ec3a2ccead56bdaeea1d4402e2ed52194393f5c1b1406a66c596700467bc00a",
+    "ops/linux/README.md": "4ac15351cd19de0d0019517155042b4e113d2581d56cb48fa01a535cb296b150",
+    "docs/WORKBENCH.md": "ed94d1c3a174e10259d0444dc9f88f46dcb339675aec5310d09b5682a4b6fd72",
+    ".gitattributes": "083bbaaa21a2336c9877f64921e13ff8b70e1c5034ecbd83badafe8e44d1b5c7"
+  }
+}

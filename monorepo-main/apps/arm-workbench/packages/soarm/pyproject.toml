@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "soarm"
+version = "0.1.0"
+description = "SO-101 robot: its robot folder and the Feetech backend plugins for the digital twin"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES", "soarm/robot/LICENSE", "soarm/environment_assets/overhead_32x32/LICENSE"]
+# The twin's plugin contracts (numpy only); never the twin itself.
+dependencies = ["machinekind-twin-api>=0.1,<0.2"]
+
+[project.optional-dependencies]
+# Servos driven directly, without LeRobot and torch; also the COM <-> TCP bridge.
+feetech = ["pyserial>=3.5"]
+# The browser test panel `soarm-panel`: the feetech backend plus robot.yaml.
+panel = ["pyserial>=3.5", "pyyaml>=6"]
+# Full remote workbench: cameras and a measured-pose viewer; no GPU required.
+workbench = ["soarm[panel]", "opencv-contrib-python>=4.8", "machinekind-twin[twin]>=0.1,<0.2"]
+# Backend `lerobot` (LeRobot 0.6 needs Python 3.12).
+lerobot = ["lerobot[feetech]>=0.6,<0.7; python_version>='3.12'"]
+
+[project.entry-points."machinekind_twin.robots"]
+so101 = "soarm:ROBOT_DIR"
+
+[project.entry-points."machinekind_twin.backends"]
+feetech = "soarm.feetech:create"
+lerobot = "soarm.lerobot_backend:create"
+
+[project.scripts]
+soarm-bridge = "soarm.serial_bridge:main"
+soarm-panel = "soarm.panel:main"
+soarm-zero = "soarm.zero:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["soarm"]

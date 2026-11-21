@@ -1,0 +1,115 @@
+# CI for the monorepo. Every job only sets up tools and calls scripts/ci/<job>.sh, so the same
+# commands run locally (README "Develop"). Plan: notes/plans/ci-plan/PLAN.md (local).
+#
+# Gates, per app: sync -> lint -> types -> test (separate steps; a failure stops the job).
+#   build needs every check job green; release archives are published only after it verifies them.
+# Secrets: none. Every job runs on public dependencies, fakes and simulation; no hardware, no server.
+# Environment: UV_VERSION and PYTHON_VERSION below mirror production (docs/deployment.md).
+# Deploy: not automated. Releases are deployed by a maintainer with scripts/deploy.sh from a
+#   reviewed commit (docs/deployment.md, which also holds the rollback procedure).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  UV_VERSION: '0.13.8'
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: apps/arm-dashboard/uv.lock
+      - name: Sync (locked, scan extra)
+        run: bash scripts/ci/dashboard.sh sync
+      - name: Lint (ruff check, ruff format --check)
+        run: bash scripts/ci/dashboard.sh lint
+      - name: Types (pyright)
+        run: bash scripts/ci/dashboard.sh types
+      - name: Test (pytest unit + contract, legacy unittest)
+        run: bash scripts/ci/dashboard.sh test
+
+  workbench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: apps/arm-workbench/uv.lock
+      - name: Sync (locked, workbench group)
+        run: bash scripts/ci/workbench.sh sync
+      - name: Lint (ruff check)
+        run: bash scripts/ci/workbench.sh lint
+      - name: Types (pyright)
+        run: bash scripts/ci/workbench.sh types
+      - name: Test (pytest, not twin and not render)
+        run: bash scripts/ci/workbench.sh test
+
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - name: Test (node --test)
+        run: bash scripts/ci/node.sh
+
+  # Packages both apps and builds each release in a --no-dev environment exactly as
+  # scripts/deploy.sh does on the server, then runs its release checks.
+  build:
+    needs: [dashboard, workbench, node]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: apps/*/uv.lock
+      - name: Package and verify releases
+        run: bash scripts/ci/build.sh dist
+      # Same archives `deploy.sh package` makes (with .sha256), for review or a manual deploy.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: releases-${{ github.sha }}
+          path: dist/
+          retention-days: 14
+          if-no-files-found: error
+
+  # The single required status check for branch protection: green only if every job above is.
+  ci-ok:
+    if: always()
+    needs: [dashboard, workbench, node, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: All jobs succeeded
+        run: |
+          echo '${{ toJSON(needs) }}'
+          [[ '${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}' == 'false' ]]

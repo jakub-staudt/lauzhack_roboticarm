@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.venv/
+.DS_Store
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.ipynb_checkpoints/
+workbench.env
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+/notes/
+.idea
+/dist/

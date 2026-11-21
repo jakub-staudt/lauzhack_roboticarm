@@ -1,0 +1,35 @@
+{
+  "phase": "complete",
+  "started_utc": "2026-11-03T12:14:00Z",
+  "elapsed_s": 60.01,
+  "duration_s": 60.0,
+  "captured_frames": 120,
+  "registered_frames": 60,
+  "rejected_frames": 60,
+  "duplicate_frames": 0,
+  "errors": 0,
+  "units": "pixels",
+  "metric_calibrated": false,
+  "robot_motion_commands": 0,
+  "registration_validated": false,
+  "note": "Automatic camera collection; unknown areas and scale are not inferred.",
+  "coverage": {
+    "anchor_pixel_bounds": [
+      [
+        0,
+        0
+      ],
+      [
+        640,
+        480
+      ]
+    ],
+    "observed_output_pixels": 307200,
+    "unobserved_output_pixels": 0,
+    "coverage_units": "anchor_camera_pixels_not_mm"
+  },
+  "candidate_mosaic_layers": 1,
+  "capture_cycles": 60,
+  "session": "scan-20261103-121359-8c28d7",
+  "evidence_note": "First live automatic session. Overhead observations registered; wrist views rejected. One anchor layer only; no additional physical board coverage or metric scale established."
+}
