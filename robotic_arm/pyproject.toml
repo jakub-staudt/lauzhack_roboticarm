@@ -1,0 +1,12 @@
+[project]
+name = "robotic-arm"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["numpy", "scipy", "pyyaml", "mujoco"]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["robotic_arm"]
