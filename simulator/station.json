@@ -1,0 +1,35 @@
+{
+  "robot": "so101",
+  "backend": "sim",
+  "home": {
+    "shoulder_pan": -42.0,
+    "shoulder_lift": -28.0,
+    "elbow_flex": 62.0,
+    "wrist_flex": 18.0,
+    "wrist_roll": 0.0,
+    "gripper": 35.0
+  },
+  "material_rgba": {
+    "robot/base_motor_holder_so101_v1_material": [0.88, 0.87, 0.84, 1],
+    "robot/base_so101_v2_material": [0.88, 0.87, 0.84, 1],
+    "robot/waveshare_mounting_plate_so101_v2_material": [0.88, 0.87, 0.84, 1],
+    "robot/motor_holder_so101_base_v1_material": [0.88, 0.87, 0.84, 1],
+    "robot/rotation_pitch_so101_v1_material": [0.88, 0.87, 0.84, 1],
+    "robot/upper_arm_so101_v1_material": [0.88, 0.87, 0.84, 1],
+    "robot/under_arm_so101_v1_material": [0.88, 0.87, 0.84, 1],
+    "robot/motor_holder_so101_wrist_v1_material": [0.88, 0.87, 0.84, 1],
+    "robot/wrist_roll_pitch_so101_v2_material": [0.88, 0.87, 0.84, 1],
+    "robot/wrist_roll_follower_so101_v1_material": [0.88, 0.87, 0.84, 1],
+    "robot/moving_jaw_so101_v1_material": [0.88, 0.87, 0.84, 1]
+  },
+  "cameras": [
+    {
+      "name": "overhead",
+      "source": "sim",
+      "width": 960,
+      "height": 720,
+      "K": [[820, 0, 479.5], [0, 820, 359.5], [0, 0, 1]],
+      "sim_pose": [[1, 0, 0, 0.315], [0, -1, 0, 0], [0, 0, -1, 0.83], [0, 0, 0, 1]]
+    }
+  ]
+}
