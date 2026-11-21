@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rectangle detector</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Rectangle detector</h1>
+  <div id="conn" class="chip" data-tone="idle">Connecting…</div>
+</header>
+
+<main>
+  <section class="stage-col">
+    <div id="verdict" class="verdict" data-tone="idle"><b id="verdict-title">Waiting for the camera…</b><span id="verdict-detail"></span></div>
+    <div class="stage">
+      <img id="cam" alt="Overhead camera view of the table" draggable="false">
+      <canvas id="overlay" role="img" aria-label="Detected tags, lines and the cropped rectangle drawn over the camera view"></canvas>
+      <div id="countdown" class="countdown" hidden aria-live="polite"><div id="count-num" class="count-num">5</div><div class="count-text">Measuring the table. Keep the camera and the table still. Moving the arm out of the way lets me see the left line.</div></div>
+    </div>
+    <div class="toolbar">
+      <button id="pause" aria-pressed="false">Pause</button>
+      <button id="recal" title="Measure the rectangle again for 5 seconds">Recalibrate (5 s)</button>
+      <label><input type="checkbox" id="l-rect" checked> <span class="key k-rect"></span>Rectangle</label>
+      <label><input type="checkbox" id="l-raw"> <span class="key k-raw"></span>Live check outline</label>
+      <label><input type="checkbox" id="l-chosen" checked> <span class="key k-chosen"></span>Lines used</label>
+      <label><input type="checkbox" id="l-lines"> <span class="key k-lines"></span>All lines seen</label>
+      <label><input type="checkbox" id="l-tags" checked> <span class="key k-tag"></span>Tags</label>
+      <label><input type="checkbox" id="l-grid" checked> <span class="key k-grid"></span>5 cm grid</label>
+      <label><input type="checkbox" id="l-left" checked> <span class="key k-left"></span>Left edge candidates</label>
+    </div>
+    <div id="hover" class="readout">Move the pointer over the picture to read table positions (cm) once the rectangle is locked.</div>
+  </section>
+
+  <aside class="panel">
+    <h2>Cropped rectangle</h2>
+    <div class="crop"><img id="crop" alt="The detected rectangle, straightened" hidden><p id="crop-empty">No rectangle yet.</p></div>
+    <p class="hint">What the robot will see inside the rectangle, straightened to a square. Its corners are the green dots.</p>
+
+    <h2>What I found</h2>
+    <ul id="checks" class="checks"></ul>
+    <h2>Notes</h2>
+    <ul id="issues" class="issues"><li class="none">Nothing to report.</li></ul>
+    <p id="timing" class="timing"></p>
+  </aside>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
