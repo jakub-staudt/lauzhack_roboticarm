@@ -1,16 +1,30 @@
 # SO-101 eye-tracking test station
 
+## Quick start (Linux, macOS incl. Apple Silicon, Windows; no ROS, no Gazebo)
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -r simulator/requirements.txt
+python -m simulator.web.server       # then open http://127.0.0.1:8810
+```
+
+That is the whole setup: MuJoCo simulates the arm, the table and the cubes, and renders the overhead camera. Tap a
+block, then tap where it should go. The interactive MuJoCo viewer is separate (`python -m simulator.run`; on macOS use
+`mjpython -m simulator.run`). Gazebo (below) is optional and Linux-only here.
+
 The station uses the arm and physics from the existing SO-101 MuJoCo workbench.
-It has a 900 × 600 mm white surface with two adjacent 300 × 300 mm squares,
-measured between the line centers. The red, blue, and yellow 20 mm cubes can be
+It has a 900 × 600 mm white surface with two adjacent 200 × 200 mm squares in front of the
+robot (it faces +x), one on its left (+y) and one on its right (-y), measured between the line centers.
+The cubes start in the left square. The red, blue, and yellow 20 mm cubes can be
 picked up directly with the gripper.
 
 ## Run the simulator
 
-From the repository root, with [uv](https://docs.astral.sh/uv/) installed:
+From the repository root, in the environment above (or with [uv](https://docs.astral.sh/uv/): `uv run --project monorepo-main/apps/arm-workbench python -m simulator.run`):
 
 ```sh
-uv run --project monorepo-main/apps/arm-workbench python -m simulator.run
+python -m simulator.run
 ```
 
 In the MuJoCo viewer, use the **Rendering** camera menu to switch between
@@ -34,3 +48,58 @@ from this checkout.
 ```sh
 uv run --project monorepo-main/apps/arm-workbench python -m pytest -q simulator/test_station.py
 ```
+
+## Gazebo version
+
+The same station also runs in Gazebo Sim (Harmonic, from the ROS 2 Jazzy install). `gazebo/build_world.py`
+generates `gazebo/station.sdf` from the compiled MuJoCo model, so both simulators share the SO-101's links,
+joint limits, inertias, collision shapes and meshes, the board, grid, cubes and the `overhead` / `wrist_cam` cameras.
+
+```sh
+python3 -m simulator.gazebo.run              # builds the world, opens Gazebo, moves the arm home
+python3 -m simulator.gazebo.run --headless   # no window; physics and cameras only
+```
+
+Use the system `python3` for the launcher and the client: it has the Gazebo Python bindings. The world is built by
+the `robotic_arm` venv (it has MuJoCo).
+
+`gazebo/client.py` (`GazeboStation`) is the programmatic interface: `command({"shoulder_pan": rad, ...})`,
+`joints()`, `image("overhead" | "wrist_cam")`, `block("red")`. Joints are position-controlled in radians over the
+topics `/so101/<joint>/cmd_pos`. Camera frames are on `/overhead/image` and `/wrist_cam/image`.
+
+Checks: `gazebo/test_world.py` (world is valid SDF and matches the MuJoCo model). A Gazebo replay of the MuJoCo
+grasp trajectory lifts the red cube by about 46 mm.
+
+Known limits: the gripper settles within about 0.035 rad of its target (joint friction); the servo's reflected
+inertia (MuJoCo `armature`) is not modelled.
+
+## Web interface: tap to move blocks
+
+A web page shows the simulated overhead camera (placed directly above the block). Tap a block, then tap where it
+should go: the arm picks it up, carries it and puts it down.
+
+```sh
+python -m simulator.web.server                    # MuJoCo backend (default): needs only the pip packages
+python -m simulator.web.server --backend gazebo   # optional: drive a running Gazebo instead (see above)
+```
+
+Add `--host 0.0.0.0` to open it from a phone on the same network (there is no login; use a trusted network).
+
+- **Move a block**: tap a block, then a destination inside either block. "Ask before moving" adds a Go button.
+- **Move the gripper**: tap a spot and the gripper goes over it.
+- **Stop** (or Esc) freezes the arm; **Home** returns it; **Reset blocks** puts the cubes back in the left block.
+- Red dots on the picture are spots the arm cannot reach with a top-down grasp (the far edges, near its maximum reach).
+- Taps are refused with a message when there is no block at the first spot, the destination is outside the blocks
+  or on top of another block, or the arm cannot reach a spot.
+
+Coordinates (centimetres, from the robot's point of view): each block has its own frame, (0, 0) at its near-left
+corner and (20, 20) at its far-right corner. `frame.py` converts between block coordinates, world coordinates and
+camera pixels. `planner.py` plans the grasp (top-down, gripper yaw in 90 degree steps so the cube stays aligned with
+the grid, 4.5 cm carry height) with the MuJoCo IK. Moves follow minimum-jerk profiles (smooth start and stop):
+peak tip speed 9 cm/s, peak joint speed about 50 deg/s, gripper 60 units/s, with short settling pauses at grasp and
+release; a pick-and-place takes about 15 to 20 seconds. The speeds are the constants at the top of `planner.py`. After changing the geometry, regenerate the reach map with
+`robotic_arm/.venv/bin/python -m simulator.planner` (about 4 minutes).
+
+Tests: `pip install pytest && python -m pytest simulator` (the Gazebo test skips itself when Gazebo is missing).
+If rendering fails on a headless Linux machine, set `MUJOCO_GL=egl` (the server does this by default on Linux).
+Placement accuracy in Gazebo is about 1 cm: the cube can shift slightly in the gripper when released.

@@ -13,9 +13,16 @@ def test_gaze_station_geometry_and_overhead_camera():
     station = load_station()
     model = build_model(station)
     assert model.nu == 6
-    assert model.geom("gaze/grid_right").pos[0] - model.geom("gaze/grid_center").pos[0] == pytest.approx(0.3)
-    assert model.geom("gaze/grid_center").pos[0] - model.geom("gaze/grid_left").pos[0] == pytest.approx(0.3)
-    assert model.geom("gaze/grid_top").pos[1] - model.geom("gaze/grid_bottom").pos[1] == pytest.approx(0.3)
+    g = lambda name: model.geom(name).pos
+    # Two 200 mm squares sharing the line y = 0, in front of the robot (+x), left (+y) and right (-y).
+    assert g("gaze/grid_left")[1] - g("gaze/grid_center")[1] == pytest.approx(0.2)
+    assert g("gaze/grid_center")[1] - g("gaze/grid_right")[1] == pytest.approx(0.2)
+    assert g("gaze/grid_far")[0] - g("gaze/grid_near")[0] == pytest.approx(0.2)
+    robot_x = station.T_base2world[0, 3]
+    assert g("gaze/grid_near")[0] > robot_x and g("gaze/grid_far")[0] > g("gaze/grid_near")[0]
+    for color in ("red", "blue", "yellow"):  # the cubes start inside the left square
+        x, y, _ = model.body(f"{color}_block").pos
+        assert g("gaze/grid_near")[0] < x < g("gaze/grid_far")[0] and 0 < y < 0.2
     camera, = station.cameras
     np.testing.assert_allclose(model.camera(camera.name).pos,
                                (station.T_base2world @ camera.T_cam2base)[:3, 3])

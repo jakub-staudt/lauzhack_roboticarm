@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gaze station</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Gaze station</h1>
+  <div id="status" class="chip" data-state="idle">Connecting…</div>
+</header>
+
+<main>
+  <section class="stage">
+    <div class="view">
+      <img id="cam" alt="Overhead camera of the table and the robot" draggable="false">
+      <canvas id="overlay"></canvas>
+    </div>
+    <div class="readout"><span id="hover">Tap the picture</span></div>
+  </section>
+
+  <section class="panel">
+    <div class="modes" role="tablist" aria-label="What a tap does">
+      <button id="mode-pp" role="tab" aria-selected="true">Move a block</button>
+      <button id="mode-go" role="tab" aria-selected="false">Move the gripper</button>
+    </div>
+    <p id="hint" class="hint">Tap a block, then tap where it should go.</p>
+
+    <div class="picks">
+      <div class="pick" id="src-box"><span class="dot src"></span><div><b>Block</b><span id="src-text">not chosen</span></div></div>
+      <div class="pick" id="dst-box"><span class="dot dst"></span><div><b>Destination</b><span id="dst-text">not chosen</span></div></div>
+    </div>
+
+    <div class="actions">
+      <button id="go" class="primary" disabled>Go</button>
+      <button id="clear">Clear</button>
+      <button id="stop" class="danger">Stop</button>
+    </div>
+    <div class="actions small">
+      <button id="home">Home</button>
+      <button id="reset">Reset blocks</button>
+      <label class="check"><input type="checkbox" id="confirm"> Ask before moving</label>
+    </div>
+
+    <h2>Blocks on the table</h2>
+    <ul id="blocks" class="blocks"></ul>
+    <p class="note">Coordinates are in centimetres from the robot's point of view: (0, 0) is the block's near-left corner and (20, 20) its far-right corner.</p>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

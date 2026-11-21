@@ -16,33 +16,34 @@
   </visual>
 
   <worldbody>
-    <camera name="overhead" pos="-0.035 0 1.58" quat="1 0 0 0"
+    <camera name="overhead" pos="-0.14 0 1.27" quat="1 0 0 0"
             resolution="960 720" sensorsize="0.00096 0.00072" focalpixel="820 820"/>
 
     <!-- The stock table supplies the contact surface at z=0.75 m. The markings are ink. -->
     <geom name="gaze/white_base" type="box" contype="0" conaffinity="0" rgba="0.93 0.93 0.92 1"
           pos="0 0 0.7496" size="0.45 0.3 0.0005"/>
-    <!-- Two 300 x 300 mm squares, measured between line centers. -->
-    <geom name="gaze/grid_top" class="gaze/guide"
-          pos="0 0.15 0.75015" size="0.3008 0.0008 0.00005"/>
-    <geom name="gaze/grid_bottom" class="gaze/guide"
-          pos="0 -0.15 0.75015" size="0.3008 0.0008 0.00005"/>
+    <!-- Two 200 x 200 mm squares in front of the robot (it faces +x), measured between line centers:
+         left (y 0..0.2) and right (y -0.2..0), sharing the line y = 0; near edge x = -0.24, far edge x = -0.04. -->
+    <geom name="gaze/grid_near" class="gaze/guide"
+          pos="-0.24 0 0.75015" size="0.0008 0.2008 0.00005"/>
+    <geom name="gaze/grid_far" class="gaze/guide"
+          pos="-0.04 0 0.75015" size="0.0008 0.2008 0.00005"/>
     <geom name="gaze/grid_left" class="gaze/guide"
-          pos="-0.30 0 0.75015" size="0.0008 0.1492 0.00005"/>
+          pos="-0.14 0.2 0.75015" size="0.1008 0.0008 0.00005"/>
     <geom name="gaze/grid_center" class="gaze/guide"
-          pos="0 0 0.75015" size="0.0008 0.1492 0.00005"/>
+          pos="-0.14 0 0.75015" size="0.1008 0.0008 0.00005"/>
     <geom name="gaze/grid_right" class="gaze/guide"
-          pos="0.30 0 0.75015" size="0.0008 0.1492 0.00005"/>
+          pos="-0.14 -0.2 0.75015" size="0.1008 0.0008 0.00005"/>
 
-    <body name="red_block" pos="-0.105 -0.075 0.76">
+    <body name="red_block" pos="-0.11 0.05 0.76">
       <freejoint/>
       <geom name="red_block" class="gaze/block" rgba="0.78 0.033 0.055 1"/>
     </body>
-    <body name="blue_block" pos="-0.135 0.075 0.76">
+    <body name="blue_block" pos="-0.11 0.15 0.76">
       <freejoint/>
       <geom name="blue_block" class="gaze/block" rgba="0.04 0.25 0.78 1"/>
     </body>
-    <body name="yellow_block" pos="-0.095 0 0.76">
+    <body name="yellow_block" pos="-0.08 0.10 0.76">
       <freejoint/>
       <geom name="yellow_block" class="gaze/block" rgba="0.88 0.61 0.035 1"/>
     </body>

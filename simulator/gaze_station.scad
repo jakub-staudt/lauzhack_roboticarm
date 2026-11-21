@@ -3,7 +3,7 @@
 // Meshes and attribution: monorepo-main/apps/arm-workbench/packages/soarm/soarm/robot/README.md.
 
 board_thickness = 15;
-square_side = 300;
+square_side = 200;
 line_width = 1.6;
 block_side = 20;
 
@@ -19,15 +19,16 @@ module arm_mesh(asset, pose, rgb) {
 
 centered_box([0, 0, -board_thickness / 2], [900, 600, board_thickness], [0.93, 0.93, 0.92]);
 
-// Measure the squares between the centerlines.
-for (y = [-square_side / 2, square_side / 2])
-    centered_box([0, y, 0.05], [2 * square_side + line_width, line_width, 0.1], [0.18, 0.21, 0.26]);
-for (x = [-square_side, 0, square_side])
-    centered_box([x, 0, 0.05], [line_width, square_side - line_width, 0.1], [0.18, 0.21, 0.26]);
+// Two 200 x 200 mm squares in front of the robot (it faces +x), measured between line centers.
+// Left square y 0..200, right square y -200..0; near edge x = -240, far edge x = -40.
+for (x = [-240, -40])
+    centered_box([x, 0, 0.05], [line_width, 2 * square_side + line_width, 0.1], [0.18, 0.21, 0.26]);
+for (y = [-square_side, 0, square_side])
+    centered_box([-140, y, 0.05], [square_side + line_width, line_width, 0.1], [0.18, 0.21, 0.26]);
 
-centered_box([-105, -75, block_side / 2], [block_side, block_side, block_side], [0.78, 0.033, 0.055]);
-centered_box([-135, 75, block_side / 2], [block_side, block_side, block_side], [0.04, 0.25, 0.78]);
-centered_box([-95, 0, block_side / 2], [block_side, block_side, block_side], [0.88, 0.61, 0.035]);
+centered_box([-110, 50, block_side / 2], [block_side, block_side, block_side], [0.78, 0.033, 0.055]);
+centered_box([-110, 150, block_side / 2], [block_side, block_side, block_side], [0.04, 0.25, 0.78]);
+centered_box([-80, 100, block_side / 2], [block_side, block_side, block_side], [0.88, 0.61, 0.035]);
 
 // Rigid mesh poses come from MuJoCo forward kinematics at the station's starting pose.
 arm_mesh("base_motor_holder_so101_v1.stl", [
