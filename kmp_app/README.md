@@ -47,6 +47,9 @@ py -3.11 -m venv .venv-sim  && .venv-sim\Scripts\pip install -r simulator\requir
 
 ### Windows 10
 
+**Installed from the .msi? Follow [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md)** (Python, project folder, camera).
+
+
 * **Installed app:** build `./gradlew :composeApp:packageMsi` on a Windows PC (or take it from CI, below). It installs per
   user (no admin) with a Start menu entry. Allow desktop apps to use the camera: Settings > Privacy > Camera.
 * **From the checkout:** `run.bat` (starts the simulator and the eye tracker in their own windows, then the app). Needs
