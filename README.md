@@ -517,8 +517,6 @@ REACHA/
 
 # Simulation and Testing
 
-Developing a remote robotic manipulation system requires a safe and reproducible environment.
-
 REACHA includes a simulation environment based on MuJoCo, allowing the robotic workspace and its interactions to be tested without requiring continuous access to the physical hardware.
 
 The simulator models:
@@ -640,10 +638,6 @@ Make sure the simulator or the intended backend is running before launching the 
 ---
 
 # Future Development
-
-REACHA establishes a foundation for more advanced gaze-controlled robotic interaction.
-
-Several extensions could substantially improve the system.
 
 ## Binocular / Stereo Vision
 
