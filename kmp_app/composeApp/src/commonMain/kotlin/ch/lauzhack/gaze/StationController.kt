@@ -190,6 +190,12 @@ class StationController(private val api: StationApi, private val scope: Coroutin
         dst = null
     }
 
+    /** Gaze window: pick the cube at [srcPx] and place it at [dstPx] (camera pixels), right away. */
+    fun pickPlace(srcPx: Pair<Double, Double>, dstPx: Pair<Double, Double>) = run { api.pickAndPlace(srcPx, dstPx) }
+
+    /** Gaze window: move the gripper over [px] (camera pixels). */
+    fun goToPx(px: Pair<Double, Double>) = run { api.goTo(px) }
+
     fun stop() = run { api.stop() }
 
     fun home() = run { api.home() }

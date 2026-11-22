@@ -1,7 +1,9 @@
 package ch.lauzhack.gaze
 
 import androidx.compose.ui.ImageComposeScene
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.Density
+import ch.lauzhack.gaze.api.GazeApi
 import ch.lauzhack.gaze.api.StationApi
 import ch.lauzhack.gaze.ui.App
 import kotlinx.coroutines.CoroutineScope
@@ -14,40 +16,78 @@ import org.jetbrains.skia.EncodedImageFormat
 import java.io.File
 
 /**
- * Dev tool: renders the real UI off-screen (no window) against a running station server and writes PNGs.
- * With `--select` it taps the first cube and a destination with "Ask before moving" on, so nothing moves.
+ * Dev tool: drives the real UI off-screen against the simulator and a mock gaze service, writing a PNG per step:
+ * prompts, calibration, object dwell, operation buttons, destination zones and "Sent". Moves the simulated arm.
  *
- *     ./gradlew :composeApp:snapshot --args="out-dir [server-url] [--select]"
+ *     .venv/bin/python -m gaze_service.server --mock --port 8821
+ *     ./gradlew :composeApp:snapshot --args="out-dir http://127.0.0.1:8810 http://127.0.0.1:8821"
  */
-fun main(args: Array<String>) = runBlocking {
+fun main(args: Array<String>): Unit = runBlocking<Unit> {
     val out = File(args.getOrElse(0) { "build/snapshots" }).apply { mkdirs() }
-    val url = args.getOrNull(1)?.takeIf { it.startsWith("http") } ?: "http://127.0.0.1:8810"
-    val select = "--select" in args
+    val url = args.getOrElse(1) { "http://127.0.0.1:8810" }
+    val gazeUrl = args.getOrElse(2) { "http://127.0.0.1:8821" }
+    val (W, H) = 1440 to 900
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val ctl = StationController(StationApi(url), scope).also { it.start() }
-    repeat(150) { if (ctl.geometry == null || ctl.frame == null || ctl.cubes.isEmpty()) delay(100) }
-    check(ctl.geometry != null && ctl.frame != null) { "No data from $url" }
+    val station = StationController(StationApi(url), scope).also { it.start() }
+    val gaze = GazeController(GazeApi(gazeUrl), scope)
+    gaze.mapper = { nx, ny -> Offset((nx * W).toFloat(), (ny * H).toFloat()) }
+    gaze.screenSize = { W to H }
+    gaze.start()
+    val scene = SceneController(station, gaze, scope).also { it.start() }
+    repeat(150) { if (station.geometry == null || station.frame == null || !gaze.serviceUp) delay(100) }
+    check(station.geometry != null && station.frame != null && gaze.serviceUp) { "No data from $url / $gazeUrl" }
 
-    if (select) {
-        val g = ctl.geometry!!
-        ctl.askBeforeMoving = true
-        val cube = ctl.cubes.first { !it.held }
-        val (cx, cy) = g.toPixel(World(cube.x, cube.y))
-        ctl.onTap(cx, cy)
-        val (dx, dy) = g.toPixel(g.blockToWorld("left", 10.0, 4.0))
-        ctl.onTap(dx, dy)
-        ctl.onHover(dx, dy)
+    val http = java.net.http.HttpClient.newHttpClient()
+    fun look(p: Offset) {
+        val req = java.net.http.HttpRequest.newBuilder(java.net.URI("$gazeUrl/api/mock"))
+            .POST(java.net.http.HttpRequest.BodyPublishers.ofString("""{"x": ${p.x / W}, "y": ${p.y / H}}""")).build()
+        http.send(req, java.net.http.HttpResponse.BodyHandlers.discarding())
+    }
+    val ui = ImageComposeScene(W, H, Density(1f)) { ch.lauzhack.gaze.ui.SceneScreen(scene) }
+    var t = 0L
+    suspend fun run(ms: Long) { repeat((ms / 40).toInt()) { ui.render(t); t += 40_000_000; delay(40) } }
+    fun shot(name: String) = File(out, "scene-$name.png").writeBytes(ui.render(t).encodeToData(EncodedImageFormat.PNG)!!.bytes)
+    suspend fun waitFor(what: String, ms: Long = 8000, cond: () -> Boolean) {
+        var left = ms
+        while (!cond() && left > 0) { run(80); left -= 80 }
+        check(cond()) { "timed out waiting for $what (stage=${scene.stage}, flow=${scene.flow})" }
     }
 
-    for ((name, dark) in listOf("light" to false, "dark" to true)) {
-        val scene = ImageComposeScene(1280, 860, Density(1f)) { App(ctl, dark) }
-        var t = 0L
-        repeat(5) { scene.render(t); t += 16_000_000; delay(50) }
-        val png = scene.render(t).encodeToData(EncodedImageFormat.PNG)!!.bytes
-        File(out, "ui-$name${if (select) "-selected" else ""}.png").writeBytes(png)
-        scene.close()
-    }
-    println("Wrote snapshots to ${out.absolutePath}")
+    gaze.cancelCalibration(); run(300)
+    waitFor("prompt") { scene.stage == Stage.SavedPrompt || scene.stage == Stage.CalibIntro }
+    shot("1-prompt")
+    scene.onKey('K')
+    waitFor("calibration") { scene.stage == Stage.Calibrating }
+    run(2600); shot("2-calibration")
+    gaze.cancelCalibration(); run(300)
+    waitFor("prompt again") { scene.stage == Stage.SavedPrompt }
+    scene.onKey('L')
+    waitFor("world intro") { scene.stage == Stage.WorldIntro }
+    shot("3-world-intro")
+    scene.onKey(' ')
+    waitFor("running", 12000) { scene.stage == Stage.Running && gaze.tracking }
+
+    val v = scene.view()!!
+    val cube = scene.objects().first()
+    look(scene.img2scr(cube.img, v)); run(1200); shot("4-object-dwell")
+    waitFor("operation") { scene.flow == Flow.Operation }
+    run(200)
+    val pick = scene.buttons().first { it.first == "pick_place" }.second.center
+    look(pick); run(1000); shot("5-operation")
+    waitFor("destination") { scene.flow == Flow.Destination }
+    val zone = scene.zones().first { !it.occupied && it.reachable }
+    look(scene.img2scr(zone.img, v)); run(1300); shot("6-destination")
+    waitFor("done") { scene.flow == Flow.Done }
+    run(300); shot("7-sent")
+    println("Scene run OK: ${scene.chosen?.name} -> ${zone.name}, arm: ${station.task.state}. PNGs in ${out.absolutePath}")
+    ui.close()
+    // the other window: simulation + controls
+    val control = ImageComposeScene(1280, 860, Density(1f)) { App(station) }
+    var tc = 0L
+    repeat(5) { control.render(tc); tc += 16_000_000; delay(50) }
+    File(out, "control-window.png").writeBytes(control.render(tc).encodeToData(EncodedImageFormat.PNG)!!.bytes)
+    control.close()
     scope.cancel()
+    kotlin.system.exitProcess(0)
 }
