@@ -217,7 +217,8 @@ class Tracker(threading.Thread):
             with self.lock:
                 self.error = (f"No images from camera {self.camera_index} yet. On macOS allow the camera for the app that started "
                               "this (Gaze Station or Terminal: System Settings > Privacy & Security > Camera); on Windows allow desktop apps to use the camera "
-                              "(Settings > Privacy > Camera). Or try GAZE_CAMERA=1. Still waiting…")
+                              "(Settings > Privacy > Camera); on Linux check that /dev/video0 exists and you are in the 'video' group. "
+                              "Or try GAZE_CAMERA=1. Still waiting…")
             log.warning("no images from camera %s yet", self.camera_index)
         with self.lock:
             self.error = ""

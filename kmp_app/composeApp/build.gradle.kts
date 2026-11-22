@@ -38,6 +38,9 @@ kotlin {
 
 // Packaging uses an Eclipse Temurin 17 that Gradle downloads into its own cache (Homebrew's JDK is refused by
 // jpackage, and this way macOS, Windows and CI all package with the same JDK).
+/** Installer version (macOS, Windows and Linux file names use it). */
+val appVersion = "1.1.0"
+
 val packagingJdk = javaToolchains.launcherFor {
     languageVersion.set(JavaLanguageVersion.of(17))
     vendor.set(JvmVendorSpec.ADOPTIUM)
@@ -49,10 +52,10 @@ compose.desktop {
         javaHome = packagingJdk.get().metadata.installationPath.asFile.absolutePath
 
         nativeDistributions {
-            // .dmg must be built on macOS, .msi on Windows (each OS packages only for itself; CI builds both).
+            // .dmg must be built on macOS, .msi on Windows, .deb on Linux (each OS packages only for itself; CI builds all).
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "GazeStation"
-            packageVersion = "1.0.0"
+            packageVersion = appVersion
             description = "Eye-tracking pick and place for the SO-101 arm (LauzHack 2026)"
             vendor = "LauzHack 2026 team"
             // java.net.http: Snapshot tool; jdk.unsupported: Compose/Skia; java.instrument & co: from suggestRuntimeModules.
@@ -82,6 +85,11 @@ compose.desktop {
             }
             linux {
                 iconFile.set(project.file("icons/icon.png"))
+                packageName = "gazestation"          // Debian package names are lower case
+                debMaintainer = "lauzhack2026@users.noreply.github.com"
+                menuGroup = "Education"
+                appCategory = "Education"
+                shortcut = true                      // adds it to the app menu (Activities)
             }
         }
     }
@@ -92,7 +100,7 @@ compose.desktop {
 // signs the app ad-hoc *with* entitlements.plist (camera + what the JVM needs) and wraps it in a .dmg.
 // Use this instead of packageDmg until there is a Developer ID to sign with.
 val macApp = layout.buildDirectory.dir("compose/binaries/main/app/GazeStation.app").get().asFile
-val macDmg = layout.buildDirectory.file("compose/binaries/main/dmg/GazeStation-1.0.0.dmg").get().asFile
+val macDmg = layout.buildDirectory.file("compose/binaries/main/dmg/GazeStation-$appVersion.dmg").get().asFile
 val isMac = System.getProperty("os.name").lowercase().contains("mac")
 
 tasks.register<Exec>("signMacApp") {

@@ -1,4 +1,5 @@
-# Builds the Kotlin Multiplatform desktop app (kmp_app/) for macOS (.dmg, Apple Silicon and Intel) and Windows (.msi).
+# Builds the Kotlin Multiplatform desktop app (kmp_app/) for macOS (.dmg, Apple Silicon and Intel), Windows (.msi)
+# and Ubuntu (.deb).
 # Each installer must be built on its own OS. Runs on demand, on pushes that touch kmp_app/, and on tags
 # like kmp-v1.0.0, which also publish both installers as a GitHub release.
 name: KMP desktop
@@ -27,6 +28,9 @@ jobs:
           - os: windows-latest
             task: packageMsi
             files: kmp_app/composeApp/build/compose/binaries/main/msi/*.msi
+          - os: ubuntu-22.04        # built on the older LTS so the .deb also installs on 24.04
+            task: packageDeb
+            files: kmp_app/composeApp/build/compose/binaries/main/deb/*.deb
     runs-on: ${{ matrix.os }}
     defaults:
       run:

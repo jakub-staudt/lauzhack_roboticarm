@@ -55,6 +55,11 @@ py -3.11 -m venv .venv-sim  && .venv-sim\Scripts\pip install -r simulator\requir
 * **From the checkout:** `run.bat` (starts the simulator and the eye tracker in their own windows, then the app). Needs
   JDK 17 (e.g. Temurin) with `JAVA_HOME` set.
 
+### Ubuntu (22.04 / 24.04)
+
+**Follow [INSTALL_LINUX.md](INSTALL_LINUX.md)** (the .deb, Python 3.11 from deadsnakes, project folder, camera).
+Build the .deb yourself with `./gradlew :composeApp:packageDeb` on Ubuntu (or take it from CI).
+
 ### Options
 
 | What | How |
@@ -65,8 +70,8 @@ py -3.11 -m venv .venv-sim  && .venv-sim\Scripts\pip install -r simulator\requir
 
 ### Installers from CI
 
-`.github/workflows/kmp-desktop.yml` builds the macOS (Apple Silicon and Intel) and Windows installers on GitHub Actions:
-run it from the Actions tab, or push a tag such as `kmp-v1.0.0` to publish them as a release. Packaging always uses an
+`.github/workflows/kmp-desktop.yml` builds the macOS (Apple Silicon and Intel), Windows and Ubuntu installers on GitHub Actions:
+run it from the Actions tab, or push a tag such as `kmp-v1.1.0` to publish them as a release. Packaging always uses an
 Eclipse Temurin 17 that Gradle downloads itself (Homebrew's JDK is refused by jpackage).
 
 ## Eye tracking window (as in gaze_scene_v2.py)
