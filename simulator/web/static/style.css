@@ -53,3 +53,8 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 2px s
 .blocks li { display: flex; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
 .swatch { width: 14px; height: 14px; border-radius: 3px; flex: none; }
 .note { font-size: .82rem; color: var(--muted); margin: 16px 0 0; }
+
+.twin { margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; background: var(--idle-bg, #eef1f5); border: 2px solid var(--line, #c9ced6); font-size: .92rem; }
+.twin[data-tone="ok"] { background: #e6f6ea; border-color: #1f8a3b; }
+.twin[data-tone="bad"] { background: #fdecec; border-color: #c0392b; }
+.twin[hidden] { display: none; }

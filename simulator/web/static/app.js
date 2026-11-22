@@ -5,7 +5,7 @@ const SWATCH = {red: '#c8081c', blue: '#0a40c8', yellow: '#e09c09'};
 const SNAP_M = 0.035;
 const BLOCKS = ['left'];           // only the left block is used
 
-let cfg = null, blocks = [], task = {state: 'idle', message: 'Connecting…'};
+let cfg = null, blocks = [], twin = null, task = {state: 'idle', message: 'Connecting…'};
 let mode = 'pp';                 // 'pp' = move a block, 'go' = move the gripper
 let src = null, dst = null;      // src: {x, y, color}; dst: {x, y}
 let notice = {text: '', kind: '', until: 0};
@@ -21,10 +21,14 @@ const toPixel = (x, y) => {
   return [(x - cfg.cam_pos[0]) / depth * cfg.cam_focal + (cfg.cam_size[0] - 1) / 2,
           -(y - cfg.cam_pos[1]) / depth * cfg.cam_focal + (cfg.cam_size[1] - 1) / 2];
 };
-const blockCorner = (name, cx, cy) => [cfg.near_x + cy / 100, cfg.origin_y[name] - cx / 100];
+const blockCorner = (name, cx, cy) => {                              // block cm (0..20) -> world metres; the block is a rotated, stretched rectangle
+  const L = cfg.left, u = cx / cfg.side_cm * L.su_m, v = cy / cfg.side_cm * L.sv_m;
+  return [L.origin[0] + v * Math.cos(L.theta) + u * Math.sin(L.theta), L.origin[1] + v * Math.sin(L.theta) - u * Math.cos(L.theta)];
+};
 function blockAt(x, y, margin = 0) {
   for (const name of BLOCKS) {
-    const cx = (cfg.origin_y[name] - y) * 100, cy = (x - cfg.near_x) * 100;
+    const L = cfg.left, dx = x - L.origin[0], dy = y - L.origin[1];
+    const cx = (dx * Math.sin(L.theta) - dy * Math.cos(L.theta)) / L.su_m * cfg.side_cm, cy = (dx * Math.cos(L.theta) + dy * Math.sin(L.theta)) / L.sv_m * cfg.side_cm;
     if (cx >= -margin && cx <= cfg.side_cm + margin && cy >= -margin && cy <= cfg.side_cm + margin) return {name, cx, cy};
   }
   return null;
@@ -177,7 +181,9 @@ function updatePicks() {
   $('src-text').textContent = src ? `${src.color} at ${describe(src.x, src.y)}` : 'not chosen';
   $('dst-text').textContent = dst ? describe(dst.x, dst.y) : 'not chosen';
   const busy = task.state === 'running' || task.state === 'planning';
-  $('go').disabled = busy || !dst || (mode === 'pp' && !src);
+  const twinOn = Boolean(twin && twin.available && twin.enabled);       // a digital twin cannot move on its own
+  $('go').disabled = busy || twinOn || !dst || (mode === 'pp' && !src);
+  for (const id of ['home', 'park', 'reset']) $(id).disabled = twinOn;
 }
 
 function renderStatus() {
@@ -202,7 +208,7 @@ function renderBlocks() {
 async function poll() {
   try {
     const state = await api('/api/state');
-    task = state.task; blocks = state.blocks; renderStatus(); renderBlocks(); draw();
+    task = state.task; blocks = state.blocks; twin = state.twin; renderTwin(); renderStatus(); renderBlocks(); draw();
   } catch (_) { task = {state: 'error', message: 'Lost connection to the simulator server.'}; renderStatus(); }
   setTimeout(poll, 300);
 }
@@ -211,3 +217,16 @@ async function poll() {
   cfg = await api('/api/config');
   nextFrame(); sizeOverlay(); poll();
 })();
+
+
+function renderTwin() {
+  const box = $('twin');
+  if (!twin || !twin.available) { box.hidden = true; return; }
+  box.hidden = false;
+  const real = twin.real || {};
+  const bad = !twin.ok || real.connected === false;
+  box.dataset.tone = bad ? 'bad' : 'ok';
+  $('twin-text').textContent = !twin.ok
+    ? `The real arm is not answering${twin.age_s != null ? ` (last seen ${twin.age_s} s ago)` : ''}; the simulated arm holds its last pose.`
+    : `Mirroring the real arm, ${twin.age_s} s old${twin.max_diff_deg != null ? `, joints within ${twin.max_diff_deg}°` : ''}${real.owner ? `, controlled by ${real.owner}` : ''}${real.emergency_stop ? ', EMERGENCY STOP latched' : ''}. This view cannot move on its own.`;
+}

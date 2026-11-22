@@ -236,6 +236,11 @@ function renderReal(locked, busy) {
   radio.disabled = !(real.available && real.connected);
   $('arm-real-label').title = !real.available ? 'The real arm is off: start the server with --real-arm.' : !real.connected ? 'The real arm is not answering.' : '';
   if (radio.disabled && radio.checked) document.querySelector('input[name=arm][value=sim]').checked = true;   // the real arm went away: back to the simulator
+  const twinOn = Boolean(drive.sim && drive.sim.twin && drive.sim.twin.available && drive.sim.twin.enabled);     // the simulator mirrors the real arm
+  const simRadio = document.querySelector('input[name=arm][value=sim]');
+  simRadio.disabled = twinOn;
+  simRadio.parentElement.title = twinOn ? 'The simulator is a digital twin: it follows the real arm, so moves go to the real arm.' : '';
+  if (twinOn && radio.disabled === false && !radio.checked) radio.checked = true;
   const isReal = realSelected();
   $('real-warn').hidden = !isReal; $('real-status').hidden = !isReal;
   if (isReal) $('real-status').textContent = real.connected ? `Real arm: ${real.owner ? 'controlled by ' + real.owner : 'nobody holds control'}; gripper ${Math.round(real.gripper)} ${real.gripper > 25 ? '(OPEN: close it first, the move will be refused)' : '(closed)'}; ${real.emergency_stop ? 'EMERGENCY STOP LATCHED' : 'emergency stop clear'}; ${real.task ? real.task.state + (real.task.message ? ' — ' + real.task.message : '') : ''}` : 'Real arm: not answering.';

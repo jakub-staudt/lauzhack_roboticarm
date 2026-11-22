@@ -115,7 +115,7 @@ class DriveService:
         try:
             state = self.sim.state()
             tip = state.get("tip_base")
-            sim = {"connected": True, "task": state["task"], "tip_base": tip}
+            sim = {"connected": True, "task": state["task"], "tip_base": tip, "twin": state.get("twin")}
             if tip and self.robot_map is not None:
                 u, v = self.robot_map.xy_to_uv(tip["x"] - self.sim_error[0], tip["y"] - self.sim_error[1])   # where the board sees the tip
                 sim["tip_uv"] = [round(u, 3), round(v, 3)]

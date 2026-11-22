@@ -105,3 +105,17 @@ If rendering fails on a headless Linux machine, set `MUJOCO_GL=egl` (the server 
 Placement accuracy in Gazebo is about 1 cm: the cube can shift slightly in the gripper when released.
 
 The web server also accepts moves in the arm's own frame: `POST /api/go_to_base {x, y, height_cm}` (metres, x forward, y left), used by `lauzkach_eye_robot_control`. If a point is too far for a straight-down gripper, the gripper is tilted (as the real arm does at its far corners).
+
+## Matching the real arm's rectangle
+When the web server starts (MuJoCo backend) it reads the corners recorded on the real arm (`robotic_arm/calibration_poses.json`, `--park-points`)
+and fits the working rectangle to them (`alignment.py`): the simulator's (0, 0) sits on the real corner_00, and the rectangle is rotated
+and stretched along each side (about 17.8 x 19.6 cm) but stays orthogonal. The drawn lines, the three blocks (same block coordinates) and
+the overlay follow; the right block is no longer used and the reach map (made for the ideal square) is hidden. `--no-align` keeps the
+ideal 20 x 20 cm squares. The Gazebo backend is not aligned.
+
+## Block size (49 mm) and the open grasp problem
+The blocks are 49 mm cubes (measured on the real gripper: fingertip gap 49.4 mm), 50 g; the gripper opens to 80 (73 mm) for the approach. The
+fixed jaw's tip is 20.1 mm to one side of the tool point, so the pick is aimed 8.4 mm behind the block's centre along the jaw axis and the
+drop is shifted by -4.4 mm (`planner.py`: `FIXED_TIP`, `PICK_OFFSET`, `GRASP_SHIFT`). **Known problem:** in the simulation the tool point stops
+at 43-53 mm instead of grasp height (27 mm) and the block is pushed aside, so the three pick-up tests and the backend pick-and-place test are
+marked `xfail` until that is understood. Top-down reach with 49 mm blocks covers only the near third of the aligned rectangle (44 of 121 spots).

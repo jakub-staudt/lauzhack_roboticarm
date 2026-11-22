@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from simulator.frame import block_to_world
-from simulator.planner import GRASP_SHIFT, GRIP_Z, GRIPPER_CLOSED, GRIPPER_OPEN, Planner, Unreachable
+from simulator.planner import GRASP_SHIFT, GRIP_Z, GRIPPER_CLOSED, GRIPPER_OPEN, PICK_OFFSET, Planner, Unreachable
 
 
 @pytest.fixture(scope="module")
@@ -25,9 +25,10 @@ def test_pick_and_place_plan_grasps_at_the_source_and_releases_at_the_destinatio
 
     grasp = max(i for i, w in enumerate(plan) if w[0] == "grasp")
     release = max(i for i, w in enumerate(plan) if w[0] == "release")
-    assert np.allclose(tip(grasp)[:2], src, atol=0.004) and tip(grasp)[2] == pytest.approx(GRIP_Z, abs=0.004)
+    # the tool point is aimed PICK_OFFSET behind the block's centre along the jaw axis (the fixed jaw's tip is 20 mm to one side of it)
+    assert np.linalg.norm(tip(grasp)[:2] - src) == pytest.approx(PICK_OFFSET, abs=0.004) and tip(grasp)[2] == pytest.approx(GRIP_Z, abs=0.004)
     # the tip releases GRASP_SHIFT beyond the target along the jaw axis, because the held cube sits against the fixed jaw
-    assert np.linalg.norm(tip(release)[:2] - dst) == pytest.approx(GRASP_SHIFT, abs=0.004)
+    assert np.linalg.norm(tip(release)[:2] - dst) == pytest.approx(abs(GRASP_SHIFT), abs=0.004)
     gripper = lambda i: planner.to_app(plan[i][1])["gripper"]  # noqa: E731
     assert gripper(grasp) == pytest.approx(GRIPPER_CLOSED, abs=0.5)
     assert gripper(release) == pytest.approx(GRIPPER_OPEN, abs=0.5)

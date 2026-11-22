@@ -286,3 +286,10 @@ def test_free_clicks_on_the_real_arm_are_refused_while_the_agent_lacks_the_heigh
     assert err.value.code == "agent_old" and real.moves == []
     service.go_corner(env(service, clock, "g2"), 0, 3.0, target="real", confirm_real=True)
     assert len(real.moves) == 1
+
+
+def test_the_simulators_digital_twin_status_reaches_the_page():
+    service, sim, clock = real_rig(FakeReal())
+    original = sim.state
+    sim.state = lambda: {**original(), "twin": {"available": True, "enabled": True, "ok": True}}
+    assert service.overview()["sim"]["twin"]["enabled"] is True

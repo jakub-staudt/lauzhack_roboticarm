@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import mimetypes
 import os
 import struct
@@ -38,8 +39,9 @@ from soarm_lab.station import PREFIX
 STATIC = Path(__file__).resolve().parent / "static"
 REACH_MAP = Path(__file__).resolve().parent / "reach_map.json"
 COLORS = ("red", "blue", "yellow")
-SNAP_M = 0.035        # a tap this close to a cube selects it
-CLEARANCE_M = 0.03    # a destination this close to another cube is refused
+START_BLOCK_CM = {"red": (15.0, 3.0), "blue": (4.0, 3.0), "yellow": (9.0, 6.0)}   # in the aligned rectangle: the near half, where a top-down grasp reaches
+SNAP_M = 0.04         # a tap this close to a block (about 49 mm across) selects it
+CLEARANCE_M = 0.06    # a destination this close (centre to centre) to another 49 mm block is refused
 
 
 def png_bytes(rgb: np.ndarray) -> bytes:
@@ -75,6 +77,63 @@ class Station:
         self.initial = {c: [float(v) for v in self.planner.model.body(f"{c}_block").pos] for c in COLORS}
         self.frame_png = b""
         self.frame_lock = threading.Lock()
+        self.aligned: dict | None = None
+        self.twin = None
+
+    def start_twin(self, url: str, rate_hz: float = 8.0) -> None:
+        """Mirror the REAL arm (read-only polling of the controller dashboard): the simulated arm follows its measured joints."""
+        from simulator.twin import Twin, http_fetch
+
+        def apply(measured: dict[str, float]) -> None:
+            self.sim.command(self.planner.to_rad(measured))
+
+        self.twin = Twin(http_fetch(url), apply, rate_hz, True)     # always together: there is no separate rehearsal mode while it runs
+        self.cancel.set()                                           # a move still running would fight the mirror
+        self.twin.start()
+
+    def twin_status(self) -> dict:
+        if self.twin is None:
+            return {"available": False}
+        out = {"available": True, **self.twin.status()}
+        real = out.get("real", {}).get("joints")
+        if real:
+            sim = self.planner.to_app(self.sim.joints())
+            out["max_diff_deg"] = round(max(abs(sim[j] - real[j]) for j in real if j != "gripper"), 1)
+        return out
+
+    def align_to_robot_points(self, path: str) -> dict:
+        """Put the working rectangle where the REAL arm's recorded corners are: its (0, 0) at the real corner_00, stretched a little
+        to the real size but still orthogonal. Moves the drawn guide lines, the three blocks (same block coordinates) and the frame."""
+        from simulator import alignment
+        base = self.planner.base
+        fit = alignment.fit(alignment.load_points(path))
+        old = {c: frame.world_to_block(*self.initial[c][:2], margin_cm=50.0) for c in COLORS}          # block coordinates before the move
+        origin = (float(base[0]) + fit["origin"][0], float(base[1]) + fit["origin"][1])
+        frame.configure_left(origin, fit["theta"], fit["su_m"], fit["sv_m"])
+        model = getattr(self.sim, "model", None)
+        if model is not None:                                                                         # MuJoCo: move the ink lines
+            th, su, sv = fit["theta"], fit["su_m"], fit["sv_m"]
+            ox, oy = origin
+            e_u, e_v = (math.sin(th), -math.cos(th)), (math.cos(th), math.sin(th))
+            quat = [math.cos(th / 2), 0.0, 0.0, math.sin(th / 2)]
+            def edge(name, start, direction, length, along_u):
+                g = model.geom(f"gaze/{name}")
+                mid = (ox + start[0] + direction[0] * length / 2, oy + start[1] + direction[1] * length / 2)
+                g.pos[:2] = mid
+                g.size[:2] = (0.0008, length / 2 + 0.0008) if along_u else (length / 2 + 0.0008, 0.0008)
+                g.quat[:] = quat
+            edge("grid_near", (0, 0), e_u, su, True)                                                  # v = 0, runs along u
+            edge("grid_far", (sv * e_v[0], sv * e_v[1]), e_u, su, True)                              # v = 1
+            edge("grid_left", (0, 0), e_v, sv, False)                                                 # u = 0, runs along v
+            edge("grid_center", (su * e_u[0], su * e_u[1]), e_v, sv, False)                           # u = 1
+            model.geom("gaze/grid_right").size[:] = (0.0, 0.0, 0.0)                                   # the right block is not used
+            for color in old:                                                                         # start the blocks where a top-down grasp reaches
+                cx, cy = START_BLOCK_CM[color]
+                x, y = frame.block_to_world("left", cx, cy)
+                self.initial[color][:2] = [x, y]
+            self.sim.reset_blocks(self.initial)
+        self.aligned = {**fit, "origin_world": origin}
+        return self.aligned
 
     # ------------------------------------------------------------------ state
     def blocks(self) -> list[dict]:
@@ -84,7 +143,7 @@ class Station:
                 x, y, z = self.sim.block(color)
             except KeyError:
                 x, y, z = self.initial[color]
-            out.append({"color": color, "x": x, "y": y, "z": z, "label": frame.describe(x, y), "held": z > 0.775})
+            out.append({"color": color, "x": x, "y": y, "z": z, "label": frame.describe(x, y), "held": z > 0.7745 + 0.012})
         return out
 
     def tip_base(self) -> dict:
@@ -94,7 +153,7 @@ class Station:
         return {"x": round(float(x), 4), "y": round(float(y), 4), "z": round(float(z), 4)}
 
     def state(self) -> dict:
-        return {"task": dict(self.task), "blocks": self.blocks(), "tip_base": self.tip_base(),
+        return {"task": dict(self.task), "blocks": self.blocks(), "tip_base": self.tip_base(), "twin": self.twin_status(),
                 "park": None if self.park_base is None else {"x": self.park_base[0], "y": self.park_base[1], "height_cm": self.park_height_cm},
                 "joints": {k: round(v, 3) for k, v in self.sim.joints().items()}}
 
@@ -106,6 +165,8 @@ class Station:
         self.task.update(kw)
 
     def _start(self, name: str, build) -> dict:
+        if self.twin is not None and self.twin.enabled:
+            raise Busy("The simulator is a digital twin: it mirrors the real arm, so it cannot move on its own. Move the real arm instead.")
         if not self.lock.acquire(blocking=False):
             raise Busy("The arm is busy. Press Stop, or wait for it to finish.")
         self.cancel.clear()
@@ -231,11 +292,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, self.station.png(), "image/png")
         if path == "/api/state":
             return self._json(self.station.state())
+        if path == "/api/twin":
+            return self._json(self.station.twin_status())
         if path == "/api/config":
-            reach = json.loads(REACH_MAP.read_text()) if REACH_MAP.exists() else None
+            reach = json.loads(REACH_MAP.read_text()) if REACH_MAP.exists() and not self.station.aligned else None   # the map is for the ideal square
             return self._json({"cam_pos": frame.CAM_POS, "cam_focal": frame.CAM_FOCAL, "cam_size": frame.CAM_SIZE,
                                "table_z": frame.TABLE_Z, "near_x": frame.NEAR_X, "origin_y": frame.ORIGIN_Y,
-                               "side_cm": frame.SIDE_CM, "reach": reach})
+                               "side_cm": frame.SIDE_CM, "reach": reach, "left": frame.LEFT, "aligned": self.station.aligned is not None})
         target = (STATIC / ("index.html" if path == "/" else path.lstrip("/"))).resolve()
         if STATIC.resolve() not in target.parents or not target.is_file():
             return self._json({"error": "not found"}, 404)
@@ -280,6 +343,9 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8810)
     ap.add_argument("--park-points", default=str(Path(__file__).resolve().parents[2] / "robotic_arm" / "calibration_poses.json"),
                     help="calibration points recorded with the real arm; the arm parks 3 cm above its corner_00 (bottom-left) after each move")
+    ap.add_argument("--no-align", action="store_true", help="keep the ideal 20 x 20 cm squares instead of fitting the rectangle to the real arm's corners")
+    ap.add_argument("--twin", metavar="URL", help="digital twin: make the simulated arm follow the REAL arm by reading the controller dashboard's "
+                    "/api/state (read-only), e.g. http://100.85.56.14:8780")
     ap.add_argument("--park-height-cm", type=float, default=3.0)
     ap.add_argument("--backend", choices=("mujoco", "gazebo"), default="mujoco",
                     help="mujoco (default): runs anywhere with `pip install mujoco`; gazebo: needs a running Gazebo")
@@ -293,6 +359,16 @@ def main() -> None:
         pass
     print(f"park spot: {'none (home pose is used)' if park_base is None else f'x {park_base[0] * 100:.1f}, y {park_base[1] * 100:.1f} cm in the arm frame, {args.park_height_cm:g} cm up'}")
     Handler.station = Station(args.backend, park_base, args.park_height_cm)
+    if not args.no_align and args.backend == "mujoco":
+        try:
+            fit = Handler.station.align_to_robot_points(args.park_points)
+            print(f"rectangle aligned to the real arm's corners: (0, 0) at world ({fit['origin_world'][0] * 100:.1f}, {fit['origin_world'][1] * 100:.1f}) cm, "
+                  f"{fit['su_m'] * 100:.1f} x {fit['sv_m'] * 100:.1f} cm, rotated {math.degrees(fit['theta']):.1f} deg, fit error {fit['residual_mm']:.1f} mm")
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"rectangle not aligned ({exc}); using the ideal squares")
+    if args.twin:
+        Handler.station.start_twin(args.twin)
+        print(f"digital twin: the simulated arm mirrors the real arm from {args.twin} (read-only; no separate mode)")
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.daemon_threads = True
     print(f"Gaze station UI ({args.backend}) on http://{args.host}:{args.port}")
