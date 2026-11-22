@@ -223,7 +223,7 @@ class DriveService:
         return self._move_closed(env, u, v, height_cm, label) if closed_loop else self._move(env, u, v, height_cm, label, real)
 
     def grasp(self, env: dict, action: str, px: float | None = None, py: float | None = None, confirm_real: bool = False,
-              box: list | None = None) -> dict:
+              box: list | None = None, park_after: bool = False) -> dict:
         """One stage of the supervised real grasp (open, hover, lower, close, lift, putback). The agent enforces the order and the safety checks."""
         duplicate = self._admit(env)
         if duplicate:
@@ -246,7 +246,8 @@ class DriveService:
                 (xa, ya), (xb, yb) = self._require_map().uv_to_xy(u0, v0), self._require_map().uv_to_xy(u1, v1)
                 yaw = math.atan2(yb - ya, xb - xa)
         try:
-            result = self.real.grasp_action(action, x, y, yaw) if yaw is not None else self.real.grasp_action(action, x, y)
+            kwargs = {"park_after": True} if park_after else {}
+            result = self.real.grasp_action(action, x, y, yaw, **kwargs) if yaw is not None else self.real.grasp_action(action, x, y, **kwargs)
         except RuntimeError as exc:
             self._note(f"The real arm refused the grasp step '{action}': {exc}")
             raise ApiError(409, str(exc), "real_refused") from exc

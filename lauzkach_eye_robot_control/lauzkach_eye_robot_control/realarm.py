@@ -15,6 +15,7 @@ Nothing here is run by the tests against a real arm.
 
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import time
@@ -369,7 +370,7 @@ class RealArmClient:
     """Same small interface as the simulator client (`state`, `go_to_base`, `stop`), so the drive service can use either."""
 
     def __init__(self, http, kin, calibration_xy: list[tuple[float, float]], z_table: float, settings: RealSettings | None = None,
-                 label: str = "Camera drive", grasp_settings: "GraspSettings | None" = None) -> None:
+                 label: str = "Camera drive", grasp_settings: "GraspSettings | None" = None, park_path: str | None = None) -> None:
         self.http, self.kin, self.z_table = http, kin, z_table
         self.settings = settings or RealSettings()
         s = self.settings
@@ -384,6 +385,13 @@ class RealArmClient:
         self._token: str | None = None
         self._lock = threading.Lock()
         self.gs = grasp_settings or GraspSettings()
+        self.park_path = park_path
+        self.park: dict | None = None
+        if park_path and Path(park_path).exists():
+            try:
+                self.park = json.loads(Path(park_path).read_text())
+            except (OSError, ValueError):
+                self.park = None
         if self.gs.align == "jaw_middle":
             self.gs.pick_offset_override = jaw_middle_offset(kin, self.gs.open_value)
         self.grasp: dict = {"stage": "idle", "pending": None}
@@ -514,7 +522,9 @@ class RealArmClient:
         g = self.grasp
         nxt = {"idle": ["open"], "open": ["hover", "open"], "hover": ["lower", "open"], "lower": ["close", "open"],
                "closed": ["lift", "open"], "lifted": ["putback"], "miss": ["open"]}.get(g["stage"], ["open"])
-        return {"stage": g["stage"], "profile": self.gs.profile, "next": nxt, "block": g.get("block"), "hold_value": g.get("hold"), "last": g.get("last", "")}
+        extra = ["set_park"] + (["park"] if self.park and g["stage"] not in ("closed", "lifted") else [])
+        park = None if not self.park else {"joints": {k: round(v, 1) for k, v in self.park["joints"].items()}, "tip_cm": self.park.get("tip_cm")}
+        return {"stage": g["stage"], "profile": self.gs.profile, "next": nxt, "extra": extra, "park": park, "block": g.get("block"), "hold_value": g.get("hold"), "last": g.get("last", "")}
 
     def _settle_stage(self) -> None:
         """A stage counts only when its job finished successfully; an error leaves the previous stage in place."""
@@ -529,14 +539,20 @@ class RealArmClient:
             self.grasp["last"] = status.get("message", "")
         self.grasp["pending"] = None
 
-    def grasp_action(self, action: str, x: float | None = None, y: float | None = None, yaw: float | None = None) -> dict:
+    def grasp_action(self, action: str, x: float | None = None, y: float | None = None, yaw: float | None = None,
+                     park_after: bool = False) -> dict:
         self._settle_stage()
         if self.mover.busy():
             raise MoveError("The arm is still moving. Wait for it to finish.")
         state = self.http("GET", "/api/state", None)
         g = self._grasp_state(state)
         stage = g["stage"]
-        if action not in g["next"]:
+        if action == "set_park":                                           # no motion: remember where the arm is now
+            return self._save_park(state)
+        if action == "park" and "park" not in g["extra"]:
+            raise MoveError("Release the block first (put it back) before parking." if stage in ("closed", "lifted") else
+                            "No park position is saved yet: move the arm there and press 'Save current arm pose as park'.")
+        if action not in g["next"] and action not in g["extra"]:
             raise MoveError(f"Not now: after '{stage}' the next steps are {', '.join(g['next'])}.")
         measured, floor = self._preflight(state, allow_open_gripper=True)
         owner = (state.get("control") or {}).get("owner_id")
@@ -551,13 +567,15 @@ class RealArmClient:
             if not (self.box[0] <= x <= self.box[1] and self.box[2] <= y <= self.box[3]):
                 raise MoveError("That point is outside the area the arm was calibrated on.")
             return self._grasp_hover(state, measured, floor, float(x), float(y), yaw)
+        if action == "park":
+            return self._go_park(state, measured, floor)
         if action == "lower":
             return self._grasp_lower(state, measured, floor)
         if action == "close":
             return self._launch_job("close gripper", self._close_gripper, None)
         if action == "lift":
             return self._grasp_lift(state, measured, floor)
-        return self._grasp_putback(state, measured, floor)
+        return self._grasp_putback(state, measured, floor, park_after)
 
     def _launch_job(self, label: str, fn, pending) -> dict:
         token = self._claim()
@@ -810,7 +828,48 @@ class RealArmClient:
             self.mover._set(message=f"Lifted the block {rose * 100:.1f} cm.")
         return self._launch_job("lift the block", job, None)
 
-    def _grasp_putback(self, state: dict, measured: dict[str, float], floor) -> dict:
+    # ---- the park pose
+    def _save_park(self, state: dict) -> dict:
+        m = {k: float(v) for k, v in state["measured"].items()}
+        tip = [round(float(c) * 100, 1) for c in self.kin.tcp(m)[:3, 3]]
+        self.park = {"about": "The park pose (measured joints, degrees): where the arm waits so it does not hide the overhead camera.",
+                     "joints": {j: round(m[j], 2) for j in ARM}, "tip_cm": tip, "saved": time.strftime("%Y-%m-%d %H:%M:%S")}
+        if self.park_path:
+            Path(self.park_path).write_text(json.dumps(self.park, indent=1))
+        self.mover._set(state="done", step="done", message=f"Park position saved: tip at x {tip[0]}, y {tip[1]}, height {tip[2]} cm.")
+        return {"state": "done", "message": self.mover.status()["message"], "park": self.park}
+
+    def _plan_park(self, start: dict[str, float], floor, limits: dict | None, rise: bool = True) -> list[Waypoint]:
+        """Rise straight up first if low (so the gripper clears the blocks), then a joint-space glide to the saved joints in <= 3 degree steps,
+        checked by sampling that the tool never dips below where it is or where the park pose is (minus 1.5 cm) nor below the controller's floor."""
+        park = {j: float(self.park["joints"][j]) for j in ARM}
+        if limits and any(not limits[j][0] + 2.0 <= park[j] <= limits[j][1] - 2.0 for j in ARM):
+            raise MoveError("The saved park pose is outside the arm's joint limits: save it again.")
+        wps: list[Waypoint] = []
+        here = dict(start)
+        z_safe = self.z_table + 0.07
+        if rise and float(self.kin.tcp(here)[2, 3]) < z_safe - 0.005:
+            up, _ = self._vertical_max(here, z_safe - float(self.kin.tcp(here)[2, 3]), floor, limits, 0.0)
+            wps += up
+            if up:
+                here = {**here, **up[-1].joints}
+        n = max(1, math.ceil(max(abs(park[j] - here[j]) for j in ARM) / 3.0))
+        path = [{j: here[j] + (park[j] - here[j]) * i / n for j in ARM} for i in range(1, n + 1)]
+        floor_z = min(float(self.kin.tcp(here)[2, 3]), float(self.kin.tcp({**here, **park})[2, 3])) - 0.015
+        if floor is not None:
+            floor_z = max(floor_z, floor + 0.001)
+        lowest = min(float(self.kin.tcp({**here, **p})[2, 3]) for p in path)
+        if lowest < floor_z:
+            raise MoveError(f"The way to the park position would dip the tool to {lowest * 100:.1f} cm (limit {floor_z * 100:.1f} cm): refused.")
+        wps += [Waypoint("park", [0.0, 0.0, 0.0], p) for p in path]
+        return wps
+
+    def _go_park(self, state: dict, measured: dict[str, float], floor) -> dict:
+        limits = (state.get("cartesian") or {}).get("joint_limits", {}).get("effective")
+        wps = self._plan_park(measured, floor, limits)
+        return self._launch_job("go to the park position", lambda t: self.mover.run_waypoints(t, wps, "going to the park position"), ("open" if self.grasp["stage"] == "idle" else self.grasp["stage"], {}))
+
+    def _grasp_putback(self, state: dict, measured: dict[str, float], floor, park_after: bool = False) -> dict:
         gs = self.gs
         dz = float(self.grasp.get("lifted_dz") or gs.lift_m)
         path = self.grasp.get("lift_path")
@@ -823,6 +882,13 @@ class RealArmClient:
         end = {**measured, **down[-1].joints} if down else dict(measured)
         limits = (state.get("cartesian") or {}).get("joint_limits", {}).get("effective")
         clear, _ = self._vertical_max(end, dz + 0.02, floor, limits, 0.0)
+        park_wps: list[Waypoint] | None = None
+        park_note = ""
+        if park_after and self.park:
+            try:
+                park_wps = self._plan_park({**end, **(clear[-1].joints if clear else {})}, floor, limits, rise=False)
+            except MoveError as exc:
+                park_note = f" (not parked: {exc})"
 
         def job(token: str) -> None:
             saved = (self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s)
@@ -833,12 +899,19 @@ class RealArmClient:
                 self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = saved
             self._gripper_to(token, gs.open_value)
             self.grasp["pending"] = ("hover", {})                              # the block is down and released from here on
-            self.mover._set(message="The block is put down and released.")
+            self.mover._set(message="The block is put down and released." + park_note)
             if clear:
                 try:
                     self.mover.run_waypoints(token, clear, "rising clear")
                 except MoveError as exc:                                      # not worth failing the step: the block is already released
                     self.mover._set(message=f"The block is put down and released (the arm did not rise clear: {exc})")
+                    return
+            if park_wps:
+                try:
+                    self.mover.run_waypoints(token, park_wps, "going to the park position")
+                    self.mover._set(message="The block is put down and released; the arm is at the park position.")
+                except MoveError as exc:
+                    self.mover._set(message=f"The block is put down and released (the arm did not reach the park position: {exc})")
         return self._launch_job("put the block back", job, ("hover", {}))
 
     def stop(self) -> dict:

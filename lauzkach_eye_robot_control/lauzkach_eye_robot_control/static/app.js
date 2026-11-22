@@ -424,25 +424,29 @@ const GRASP_TEXT = {
   lower: 'Lower the open gripper straight down to the height of the block\'s centre, in 1 cm steps. It stops if anything resists.',
   close: 'Close the gripper slowly until it stalls on the block.',
   lift: 'Lift the block 6 cm straight up.',
-  putback: 'Lower the block back, open the gripper and rise clear.',
+  putback: 'Lower the block back, open the gripper and rise clear (and go to the park position if the box below is ticked).',
+  park: 'Move the arm to the saved park position and orientation: up first, then a slow glide there, out of the camera\'s way.',
+  set_park: 'Remember the arm\'s CURRENT pose (position and orientation) as the park pose. The arm does not move.',
 };
 function renderGrasp() {
   const card = $('grasp-card');
   const real = (drive && drive.real) || {}, g = real.grasp;
   card.hidden = !(realSelected() && g);
   if (card.hidden) return;
-  const busy = driveBusy(), allowed = new Set(g.next || []);
+  const busy = driveBusy(), allowed = new Set([...(g.next || []), ...(g.extra || [])]);
+  $('park-text').textContent = g.park ? `Park position saved: tip at x ${g.park.tip_cm[0]}, y ${g.park.tip_cm[1]}, height ${g.park.tip_cm[2]} cm.` : 'No park position saved yet.';
   $('grasp-text').textContent = `Stage: ${g.stage}.` + (g.hold_value ? ` Jaws stalled at ${g.hold_value.toFixed(1)}.` : '') + (g.last ? ` ${g.last}` : '') + (g.block ? '' : ' Click the block on the picture first.');
   card.querySelectorAll('button[data-grasp]').forEach(b => {
     const a = b.dataset.grasp;
     b.disabled = busy || !allowed.has(a) || (a === 'hover' && !target) || !real.connected;
-    b.classList.toggle('next', !b.disabled && a === (g.next || [])[0]);                 // highlight the step to press next
+    b.classList.toggle('next', !b.disabled && a === (g.next || [])[0] && a !== 'park' && a !== 'set_park');                 // highlight the step to press next
   });
 }
 document.querySelectorAll('#grasp-card button[data-grasp]').forEach(b => b.addEventListener('click', async () => {
   const action = b.dataset.grasp;
   if (!confirm(`REAL ARM: ${GRASP_TEXT[action]}\n\nWatch the gripper camera and keep Stop (Esc) ready. Continue?`)) return;
   const body = {action, confirm_real: true};
+  if (action === 'putback' && $('park-after').checked) body.park_after = true;
   if (action === 'hover') { body.px = target.px; body.py = target.py; if (target.block && target.block.box_px) body.box = target.block.box_px; }
   await drivePost('/api/drive/grasp', body, `Grasp step: ${action}`);
 }));

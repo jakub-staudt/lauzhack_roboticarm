@@ -111,11 +111,12 @@ def make_handler(agent: AgentState):
                     x = None if body.get("x") is None else float(body["x"])
                     y = None if body.get("y") is None else float(body["y"])
                     yaw = None if body.get("yaw") is None else float(body["yaw"])
+                    park_after = bool(body.get("park_after", False))
                 except (KeyError, TypeError, ValueError):
                     return self._send(400, {"error": "action (and x, y for hover) are required"})
                 with agent.lock:
                     try:
-                        return self._send(200, agent.client.grasp_action(action, x, y, yaw))
+                        return self._send(200, agent.client.grasp_action(action, x, y, yaw, park_after))
                     except RuntimeError as exc:
                         return self._send(409, {"error": str(exc)})
             if self.path == "/go":
@@ -148,6 +149,7 @@ def main() -> None:
     ap.add_argument("--deadman-seconds", type=float, default=4.0)
     ap.add_argument("--pause-s", type=float, default=0.35)
     ap.add_argument("--max-step-deg", type=float, default=3.0)
+    ap.add_argument("--park-pose", default=str(Path(__file__).resolve().parents[1] / "park_pose.json"), help="JSON with the park pose (joints); the page can re-save it")
     ap.add_argument("--grasp-profiles", default=str(Path(__file__).resolve().parents[1] / "grasp_profiles.json"), help="JSON with the grasp settings profiles")
     ap.add_argument("--grasp-profile", default="centred", help="which profile the staged grasp uses (current, sim_elite, centred)")
     args = ap.parse_args()
@@ -164,7 +166,7 @@ def main() -> None:
         raise SystemExit("the token must be at least 16 characters")
     client = RealArmClient(pooled_http(args.controller), RobotKinematics(load_robot()), points, z_table,
                            RealSettings(pause_s=args.pause_s, max_step_deg=args.max_step_deg), label="Camera drive (server agent)",
-                           grasp_settings=GraspSettings.from_profile(args.grasp_profiles, args.grasp_profile))
+                           grasp_settings=GraspSettings.from_profile(args.grasp_profiles, args.grasp_profile), park_path=args.park_pose)
     agent = AgentState(client, token, args.deadman_seconds)
     stop = threading.Event()
     threading.Thread(target=agent.watchdog, args=(stop,), daemon=True, name="deadman").start()

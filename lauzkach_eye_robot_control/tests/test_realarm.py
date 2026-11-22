@@ -593,3 +593,68 @@ def test_the_hover_turns_the_wrist_so_the_jaws_close_across_the_block_and_puts_t
         middle = tip(joints)[:2] + jaw_middle_offset(KIN, 92.0) * unit
         assert np.hypot(*(middle - [x, y])) < 0.008, (yaw_deg, middle, (x, y))          # the middle of the open jaws is over the block's centre
         assert c.state()["grasp"]["stage"] == "hover"
+
+
+# ------------------------------------------------------------------------------------------------ the park pose
+def _park_joints():
+    """A realistic park pose: the arm hovering about 6 cm above the board (a park pose resting on the table would be below the controller's floor)."""
+    rest = {k: float(v) for k, v in POINTS[0]["joints"].items()}
+    dash = FakeDashboard(joints=rest, gripper=10.0)
+    c = client(dash)
+    x, y = block_xy(rest, dx=0.0, dy=-0.06)
+    run_stage(c, "open")
+    run_stage(c, "hover", x=x, y=y)
+    return {k: float(dash.m[k]) for k in ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")}
+
+
+PARK_JOINTS = _park_joints() if POINTS else {}
+
+
+def park_rig(tmp_path, gripper_floor=49.4):
+    import json as _json
+    rest = {k: float(v) for k, v in POINTS[0]["joints"].items()}
+    dash = FakeDashboard(joints=rest, gripper=10.0, gripper_floor=gripper_floor)
+    path = tmp_path / "park_pose.json"
+    c = RealArmClient(dash, KIN, CAL, z_table=-0.003, settings=RealSettings(pause_s=0.0), park_path=str(path))
+    return dash, c, rest, path, _json
+
+
+def test_save_the_current_pose_as_the_park_pose_writes_a_file_and_needs_no_motion(tmp_path):
+    dash, c, rest, path, _json = park_rig(tmp_path)
+    assert "park" not in c.state()["grasp"]["extra"] and c.state()["grasp"]["park"] is None
+    with pytest.raises(MoveError, match="No park position"):
+        c.grasp_action("park")
+    res = c.grasp_action("set_park")
+    saved = _json.loads(path.read_text())
+    assert all(abs(saved["joints"][j] - rest[j]) < 0.01 for j in PARK_JOINTS) and dash.targets == [] and dash.owner is None
+    g = c.state()["grasp"]
+    assert "park" in g["extra"] and g["park"]["tip_cm"] == saved["tip_cm"]
+    c2 = RealArmClient(dash, KIN, CAL, z_table=-0.003, settings=RealSettings(pause_s=0.0), park_path=str(path))          # survives a restart
+    assert c2.state()["grasp"]["park"] is not None
+
+
+def test_go_to_park_rises_first_then_glides_to_the_saved_joints_and_releases_control(tmp_path):
+    dash, c, rest, path, _json = park_rig(tmp_path)
+    path.write_text(_json.dumps({"joints": PARK_JOINTS, "tip_cm": [0, 0, 0]}))
+    c.park = _json.loads(path.read_text())
+    st = run_stage(c, "park")
+    assert st["state"] == "done", st
+    assert all(abs(dash.m[j] - PARK_JOINTS[j]) < 1.0 for j in PARK_JOINTS), {j: (dash.m[j], PARK_JOINTS[j]) for j in PARK_JOINTS}
+    assert dash.owner is None
+    first = {j: v for j, v in dash.targets[:5]}
+    assert tip({**rest, **first})[2] > tip(rest)[2]                                  # the first thing it does is rise
+
+
+def test_park_is_refused_while_the_jaws_hold_a_block_and_after_putting_back_the_arm_parks_if_asked(tmp_path):
+    import json as _json
+    dash, c, rest, path, _ = park_rig(tmp_path)
+    c.park = {"joints": PARK_JOINTS, "tip_cm": [0, 0, 0]}
+    x, y = block_xy(rest)
+    for action, kw in (("open", {}), ("hover", dict(x=x, y=y)), ("lower", {}), ("close", {}), ("lift", {})):
+        run_stage(c, action, **kw)
+    with pytest.raises(MoveError, match="Release the block first"):
+        c.grasp_action("park")
+    st = run_stage(c, "putback", park_after=True)
+    assert st["state"] == "done" and "park position" in st["message"], st
+    assert all(abs(dash.m[j] - PARK_JOINTS[j]) < 1.0 for j in PARK_JOINTS)
+    assert dash.m["gripper"] == pytest.approx(92.0, abs=1.5) or dash.m["gripper"] > 70
