@@ -1,18 +1,21 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.multiplatform)
+    alias(libs.plugins.android.application)
 }
 
 kotlin {
     jvmToolchain(17)
 
-    // Desktop (macOS / Windows / Linux) for now. Android, iOS and web targets can be added later:
-    // all UI and logic live in commonMain; only image decoding and the HTTP engine are per platform.
+    // Desktop (macOS / Windows / Linux) and Android (a thin client: the laptop runs the simulator and eye tracker).
+    // All UI and logic live in commonMain; only image decoding, the HTTP engine and the entry points are per platform.
     jvm("desktop")
+    androidTarget()
 
     sourceSets {
         commonMain.dependencies {
@@ -26,6 +29,12 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
         }
+        androidMain.dependencies {
+            implementation(libs.androidx.activity.compose)
+            implementation(libs.androidx.camera.camera2)
+            implementation(libs.androidx.camera.lifecycle)
+            implementation(libs.ktor.client.okhttp)
+        }
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)
@@ -36,10 +45,48 @@ kotlin {
     }
 }
 
+// Android app: the phone shows the UI and streams its front camera; the laptop (serve_phone.command) does the work.
+// Release builds are signed with the key described in ~/.gazestation/signing.properties when it exists
+// (storeFile, storePassword, keyAlias, keyPassword); otherwise with the debug key.
+val signingProps = Properties().apply {
+    val f = File(System.getProperty("user.home"), ".gazestation/signing.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+android {
+    namespace = "ch.lauzhack.gazestation"
+    compileSdk = 35
+    defaultConfig {
+        applicationId = "ch.lauzhack.gazestation"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 3
+        versionName = "1.2.0"
+    }
+    signingConfigs {
+        if (signingProps.isNotEmpty()) create("release") {
+            storeFile = File(signingProps.getProperty("storeFile"))
+            storePassword = signingProps.getProperty("storePassword")
+            keyAlias = signingProps.getProperty("keyAlias")
+            keyPassword = signingProps.getProperty("keyPassword")
+        }
+    }
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
 // Packaging uses an Eclipse Temurin 17 that Gradle downloads into its own cache (Homebrew's JDK is refused by
 // jpackage, and this way macOS, Windows and CI all package with the same JDK).
 /** Installer version (macOS, Windows and Linux file names use it). */
-val appVersion = "1.1.0"
+val appVersion = "1.2.0"
 
 val packagingJdk = javaToolchains.launcherFor {
     languageVersion.set(JavaLanguageVersion.of(17))

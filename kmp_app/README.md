@@ -60,6 +60,13 @@ py -3.11 -m venv .venv-sim  && .venv-sim\Scripts\pip install -r simulator\requir
 **Follow [INSTALL_LINUX.md](INSTALL_LINUX.md)** (the .deb, Python 3.11 from deadsnakes, project folder, camera).
 Build the .deb yourself with `./gradlew :composeApp:packageDeb` on Ubuntu (or take it from CI).
 
+### Android (phone + laptop)
+
+**Follow [INSTALL_ANDROID.md](INSTALL_ANDROID.md).** The APK is a thin client: the laptop runs `serve_phone.command`
+(simulator + eye tracker over Tailscale), the phone shows the screens and streams its front camera.
+Build: `./gradlew :composeApp:assembleRelease` (needs the Android SDK, `local.properties` with `sdk.dir`, and the
+signing key in `~/.gazestation/signing.properties`; without it the debug key is used).
+
 ### Options
 
 | What | How |
@@ -116,17 +123,13 @@ Goes through the prompts, calibration, object, operation and destination by gaze
 and `control-window.png`.
 It really moves the simulated arm.
 
-## Android and iOS (next)
+## iOS (next)
 
 All UI and logic are in `commonMain` (no JVM-only code); only `Platform.desktop.kt` (image decoding), `Main.kt` and
 `LocalServices.kt` are desktop-specific. To add the mobile targets:
 
-1. **Android:** install Android Studio (SDK), add the `com.android.application` plugin and `androidTarget()`, an
-   `androidMain` with `MainActivity` (`setContent { App(...) }`), `actual fun decodeImage` with `BitmapFactory`, and the
-   `ktor-client-okhttp` engine. The phone cannot start Python, so the simulator and the gaze service run on a laptop
-   and the app connects over the network (Tailscale or Wi-Fi): `--host 0.0.0.0` on the servers.
-2. **iOS:** needs a Mac with full Xcode (this one has only the Command Line Tools). Add `iosArm64()` /
+1. **iOS:** needs a Mac with full Xcode (this one has only the Command Line Tools). Add `iosArm64()` /
    `iosSimulatorArm64()` with a framework, an `iosApp` Xcode project, `actual fun decodeImage` via Skia
    (`Image.makeFromEncoded`) and the `ktor-client-darwin` engine.
-3. **Eye tracking on a phone:** EyeGestures is Python, so either stream the phone's front camera to the laptop's gaze
+2. **Eye tracking on a phone:** done for Android by streaming to the laptop (`gaze_service --phone`). Alternatively EyeGestures is Python, so either stream the phone's front camera to the laptop's gaze
    service, or use the platform face tracking (ARKit on iOS, ML Kit / MediaPipe on Android) and send the gaze point.

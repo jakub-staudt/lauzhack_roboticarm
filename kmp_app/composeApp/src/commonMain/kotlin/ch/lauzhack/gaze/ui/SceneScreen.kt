@@ -81,7 +81,7 @@ fun SceneScreen(scene: SceneController) {
                         scene.gaze.launchNote ?: "Start it with:  .venv/bin/python -m gaze_service.server",
                         "(${scene.gaze.baseUrl})",
                     ) else if (status?.error?.isNotBlank() == true) listOf("Eye camera not available") + status.error.chunked(90)
-                    else listOf("Waiting for the eye camera", "Opening the MacBook camera…"),
+                    else listOf("Waiting for the eye camera", "Opening the camera…"),
                 )
                 Stage.SavedPrompt -> text.message(listOf(
                     "Calibration found",

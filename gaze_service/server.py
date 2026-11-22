@@ -4,6 +4,7 @@ so the Kotlin app (kmp_app) can run the full-screen gaze scene.
     .venv/bin/python -m gaze_service.server                 # http://127.0.0.1:8820, webcam 0
     .venv/bin/python -m gaze_service.server --camera 1
     .venv/bin/python -m gaze_service.server --mock          # no camera: gaze comes from POST /api/mock (testing)
+    .venv/bin/python -m gaze_service.server --phone --host 0.0.0.0   # the Android app sends its front camera
 
 The app shows the calibration dots full screen; this service decides where they go and when to move on, exactly like
 the pygame prototype (25-dot snake, then 5 crosses for the drift correction). Coordinates in the API are normalised
@@ -15,6 +16,7 @@ to the screen: (0, 0) top-left, (1, 1) bottom-right.
     POST /api/load        {"screen": [w, h]}  load the saved calibration (eg_calibration.pkl)
     POST /api/cancel      stop a running calibration
     POST /api/mock        {"x": .., "y": ..} or {"face": false}   (--mock only)
+    POST /api/frame       a JPEG from the phone's front camera, upright (--phone only); returns /api/gaze
 
 On macOS the terminal that starts this needs camera permission (System Settings > Privacy & Security > Camera).
 """
@@ -52,6 +54,7 @@ CORR_SKIP = 0.5
 STABLE_WINDOW = 0.3       # gaze_scene_v2.py
 MOVE_SHIFT_PX = 120       # px on a ~1440 px screen; scaled with the screen width below
 FACE_TIMEOUT = 1.0
+MAX_FRAME_BYTES = 2_000_000
 
 
 def calibration_map() -> np.ndarray:
@@ -124,13 +127,50 @@ class Camera:
             return True, self.frame
 
 
+class PhoneFrames:
+    """Frames sent by the phone app (POST /api/frame, JPEG). Same interface as Camera, so the tracker does not care."""
+
+    def __init__(self) -> None:
+        self.frame = None
+        self.stamp = 0.0
+        self.seen = 0.0
+        self.size = (0, 0)
+        self.cond = threading.Condition()
+        self.received = 0
+
+    def push(self, jpeg: bytes) -> bool:
+        import cv2
+        frame = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            return False
+        with self.cond:
+            self.frame, self.stamp = frame, time.time()
+            self.size = (frame.shape[1], frame.shape[0])
+            self.received += 1
+            self.cond.notify_all()
+        return True
+
+    def wait_first(self, timeout: float) -> bool:
+        with self.cond:
+            return self.cond.wait_for(lambda: self.frame is not None, timeout)
+
+    def read(self):
+        with self.cond:
+            self.cond.wait_for(lambda: self.stamp > self.seen, 0.2)
+            if self.frame is None or self.stamp <= self.seen:
+                return False, None
+            self.seen = self.stamp
+            return True, self.frame
+
+
 class Tracker(threading.Thread):
     """Reads the webcam and runs EyeGestures in one thread; HTTP handlers only read snapshots and post requests."""
 
-    def __init__(self, camera: int, mock: bool) -> None:
+    def __init__(self, camera: int, mock: bool, phone: bool = False) -> None:
         super().__init__(daemon=True)
         self.camera_index = camera
         self.mock = mock
+        self.phone = PhoneFrames() if phone else None
         self.lock = threading.Lock()
         self.W, self.H = 1440.0, 900.0
         self.corr = np.array([1.0, 0.0, 1.0, 0.0])        # x' = a*x + b, y' = c*y + d (screen px)
@@ -178,6 +218,7 @@ class Tracker(threading.Thread):
                 "moving": self.moving,
                 "target": self.target,
                 "savedCalibration": CALIB_FILE.exists(),
+                "source": "mock" if self.mock else "phone" if self.phone else "camera",
             }
 
     # ---------------------------------------------------------------- tracker thread
@@ -211,6 +252,17 @@ class Tracker(threading.Thread):
         self.gestures = EyeGestures_v3()
         self.gestures.uploadCalibrationMap(calibration_map(), context=CTX)
         self.gestures.setFixation(1.0)
+        if self.phone is not None:
+            # The camera is the phone's: wait until the app sends its first frame.
+            self.cap = self.phone
+            while not self.cap.wait_first(6.0):
+                with self.lock:
+                    self.error = "Waiting for the phone's camera: open Gaze Station on the phone and allow the camera."
+            with self.lock:
+                self.error = ""
+                self.camera_ok = True
+            log.info("phone camera connected, %dx%d", *self.cap.size)
+            return
         self.cap = Camera(self.camera_index)
         # Keep waiting: the macOS camera prompt (or a permission switched on in Settings) can come later.
         while not self.cap.wait_first(6.0):
@@ -467,6 +519,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
+        if path == "/api/frame":   # a JPEG from the phone's front camera (--phone); answers with the gaze
+            n = int(self.headers.get("Content-Length") or 0)
+            data = self.rfile.read(n) if 0 < n <= MAX_FRAME_BYTES else b""
+            if self.tracker.phone is None:
+                return self.send_json({"error": "Start the service with --phone"}, HTTPStatus.CONFLICT)
+            if not data or not self.tracker.phone.push(data):
+                return self.send_json({"error": "Not a JPEG image"}, HTTPStatus.BAD_REQUEST)
+            return self.send_json(self.tracker.snapshot())
         try:
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n) or b"{}")
@@ -498,13 +558,14 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8820)
     ap.add_argument("--camera", type=int, default=0, help="webcam index (front camera), as CAM_INDEX in the prototype")
     ap.add_argument("--mock", action="store_true", help="no camera; set the gaze with POST /api/mock")
+    ap.add_argument("--phone", action="store_true", help="use the phone app's front camera (frames via POST /api/frame)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
-    tracker = Tracker(args.camera, args.mock)
+    tracker = Tracker(args.camera, args.mock, args.phone)
     tracker.start()
     Handler.tracker = tracker
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    log.info("gaze service on http://%s:%d%s", args.host, args.port, " (mock)" if args.mock else "")
+    log.info("gaze service on http://%s:%d%s", args.host, args.port, " (mock)" if args.mock else " (phone camera)" if args.phone else "")
     server.serve_forever()
 
 
