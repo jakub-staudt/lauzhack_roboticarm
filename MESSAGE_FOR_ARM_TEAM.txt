@@ -1,0 +1,85 @@
+MESSAGE FOR THE ARM TEAM (from Tom's laptop) - 2026-11-22
+==========================================================
+
+This file is temporary: it will be removed once you have read it and answered.
+Please paste this whole file into your Claude Code session and let it help you.
+
+WHAT WE BUILT
+-------------
+The final front end: a Kotlin app (Gaze Station) where the user chooses a block and
+a destination BY EYE TRACKING (Logitech camera on Tom's laptop), on the LIVE overhead
+camera from Poland. Look at a block (2 s), at "Pick & place" (1.5 s), then at a zone
+(2 s): that last dwell is the confirmation. While the arm moves, a red STOP box is
+shown (0.8 s dwell) and Esc stops too.
+
+The app drives YOUR camera page server (lauzkach_eye_robot_control.server), running on
+Tom's laptop in agent mode, and calls your POST /api/drive/pickplace with
+confirm_real: true and the same envelope as your web page (cid, sent_ms, gen).
+The arm moves through YOUR arm agent on ramion-server-01 (port 8790).
+
+  Branch:   final-gaze-real-arm  (main d38d5f7 + the Kotlin app + gaze_service)
+  Launcher: kmp_app/run_real.command, which runs:
+
+    python -m lauzkach_eye_robot_control.server \
+      --real-agent http://100.85.56.14:8790 \
+      --agent-token-file ~/.gazestation/agent_token \
+      --robot-points robotic_arm/calibration_poses.json \
+      --camera "http://100.85.56.14:8780/cameras/overhead.mjpg?fps=10&profile=preview"
+
+Tested end to end against a FAKE agent on Tom's laptop: all steps went out
+(open, hover, lower, lower_stop, close, lift, carry, place) and the run finished.
+Port 8790 is reachable from Tom's laptop over Tailscale.
+NOTHING CAN MOVE THE REAL ARM YET: Tom does not have the two files below.
+
+
+WHAT WE NEED FROM YOU
+---------------------
+
+1) THE ARM AGENT TOKEN (~/arm_agent/token on ramion-server-01) - ENCRYPTED ONLY
+
+   NEVER commit the plain token, not even for a moment: deleting the commit later
+   does not remove it from git history or from anyone's clone.
+   Encrypt it with Tom's public key below; only Tom's laptop has the private key.
+   On the server (where the token is), run:
+
+     cat > /tmp/gazestation_token_key.pub.pem <<'KEY'
+-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAmW4nd9XgP7fjB36l2URP
+2Je77Vc5rnwsByjWLcqSIyPQHGDvD23jVMMn7b0ZmvSOYc41Zo629I2PvnYu7dYb
+yYReyYh+GFefTIRtjVJ2KaiPSrIJvm+iXLZw9lO60Mn25yHCi6AlrP/bQowzZ9Gc
+bC+A/leU46mxwt64lQFjH36Uv7UCOTgvuf2G7eUDUVPX54EpHDZ48HXQ83nLHVx7
+5Az5zywIDDzBdN9bTfhqao4+ROkzuj5JTAhowSjugwS9p1EuW/2y/hnbCWSC7Czs
+1vJBIAyjwuuYMWT8X4zB8+GqGM3celx/fUYv6j4If9jTd9VUBQ4fsR8sqJ343qMv
++r4SyheevMGJXf37DeLDtVY91IRYq0Q7DHcPbiKPXICNYo2FPtd2B2uFR2HAwHhV
+PXHe3rljJVkMe97H7BRmlY+iuU+XGGoWXyJfXxFitQ9s76cgXwwrsdVTCKo2l3Rh
+0jfpFqOhShnJNMg3Bo7x/4cHrEfwEE+K0+AH9TnAEF1LAgMBAAE=
+-----END PUBLIC KEY-----
+KEY
+     openssl pkeyutl -encrypt -pubin -inkey /tmp/gazestation_token_key.pub.pem \
+       -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
+       -in ~/arm_agent/token | openssl base64 -A > /tmp/agent_token.enc.b64
+     cat /tmp/agent_token.enc.b64          # 512 characters; safe to commit
+
+   Put that output in the repo as  handoff/agent_token.enc.b64  and push it to main.
+
+2) THE ARM CALIBRATION FILE  robotic_arm/calibration_poses.json  (gitignored)
+   The one your page loads with --robot-points. Not secret.
+   Copy it to  handoff/calibration_poses.json  and push it to main.
+
+3) PLEASE ANSWER (write the answers in handoff/ANSWERS.txt and push to main)
+   a. Is the agent running in tmux on the server from the same code as main d38d5f7,
+      including the carry/place actions of commit a786bc5? If not, does it need
+      updating first? (Tom will not touch the server.)
+   b. Is --robot-faces up (the default) right for the current camera, or do you start
+      the server with another value?
+   c. Which grasp profile and park pose do you use now? Are grasp_profiles.json and
+      park_pose.json in main the current ones?
+   d. Any other flags or settings you use for real pick and place (deadman, wrist
+      snapshot, ...)?
+   e. Has the one-button pick and place (/api/drive/pickplace) been run on the real
+      arm yet, and did it work?
+   f. When can someone watch the arm in Poland, with Stop ready, for the first
+      gaze-driven move? (Tom's app sends /api/drive/stop from the STOP dwell or Esc;
+      the camera page on Tom's laptop, http://127.0.0.1:8820, also has Stop.)
+
+Thank you!

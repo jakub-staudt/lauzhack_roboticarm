@@ -1,0 +1,47 @@
+ANSWERS FOR TOM (from Jakub's laptop and the arm agent) - 2026-11-22
+====================================================================
+Everything you asked for is in this folder (handoff/):
+  agent_token.enc.b64      the arm agent token, encrypted with YOUR public key (RSA-OAEP, SHA-256). Only your private key can open it.
+  calibration_poses.json   the arm calibration file (copy it to robotic_arm/calibration_poses.json on your laptop)
+  ANSWERS.txt              this file
+  SETUP_FOR_TOM.txt        step by step: decrypt the token, start everything, what your app must send, safety rules
+
+a. Is the agent running in tmux on the server from the same code as main, including carry/place?
+   YES. tmux session "arm_agent" on ramion-server-01, listening on 100.85.56.14:8790 (Tailscale only). I compared the server's files with the repo today:
+   realarm.py, arm_agent.py, grasp_profiles.json and park_pose.json are IDENTICAL to main (d38d5f7 and later; no agent change since commit a786bc5).
+   It has the carry and place actions and the lower_stop action. No update is needed. You do not need to touch the server.
+   The agent was started with:  --pause-s 0.15 --max-step-deg 5   (grasp profile "centred", park pose from park_pose.json).
+
+b. Is --robot-faces up right?
+   YES. "up" (the default) is right for the current overhead camera: the robot is at the left of the picture, u runs to the robot's right,
+   v away from it. Do not pass another value.
+
+c. Which grasp profile and park pose?
+   The agent default is the profile "centred" (lauzkach_eye_robot_control/grasp_profiles.json): gripper opening 92, the middle between the open jaws
+   aimed at the block's centre, grasp tool height 28.7 mm, hover 70 mm. The park pose is park_pose.json (tip x 21.8, y 9.2, height 5.6 cm).
+   Both files in main are the current ones, and they are the ones on the server.
+
+d. Other flags or settings for real pick and place?
+   Page server (your laptop):  python -m lauzkach_eye_robot_control.server --real-agent http://100.85.56.14:8790 --agent-token-file <token file>
+     --robot-points robotic_arm/calibration_poses.json --camera "http://100.85.56.14:8780/cameras/overhead.mjpg?fps=10&profile=preview"
+   - The "--simulator" flag can stay at its default; no simulator is needed for the real arm (the page just says the simulator is not connected).
+   - The gripper camera watcher (stops the lowering when the block's lower edge reaches the bottom of the gripper picture) reads
+     http://100.85.56.14:8780/cameras/wrist.jpg by itself (the default of --wrist-snapshot). Nothing to set, but that URL must be reachable over Tailscale.
+   - DEAD-MAN: the page server holds the arm if nothing has talked to it for 3 seconds while a move runs (--deadman-seconds, default 3).
+     Your app MUST keep calling GET /api/drive (about once a second) the whole time the arm moves.
+   - The rectangle is measured for 5 seconds after the page server starts: start it with the arm out of the way and the camera still.
+   - The overhead camera must see the four tags / the lines; blocks are found by colour (red, blue, green, yellow). There is no brown block.
+   - Only ONE operator at a time: the manual page ("Eye-control UI ...") must not hold control, or the agent refuses with "Someone else holds control".
+
+e. Has /api/drive/pickplace been run on the real arm, and did it work?
+   PARTLY. On the real arm the one-button run went through step 1 to 5 (open, hover over the block with the wrist turned to the block's faces, lower with the
+   gripper camera, grip, lift 6 cm: the blue block was picked up and lifted). Step 6 (carry) was then refused because of a bug I have since fixed (the picked
+   block was counted as another block). After the fix the carry and place steps were tested only against a fake arm, not yet on the real arm in one
+   complete run. So: the pick-up half is proven on the real arm; carry+place+park is fixed but not yet run end to end on the real arm. The first
+   complete run should be supervised. Each step has its own safety checks and any failure stops the sequence with the step and the reason.
+
+f. When can someone watch the arm in Poland, with Stop ready, for the first gaze-driven move?
+   TO BE ANSWERED BY JAKUB (he decides the time). Until he confirms, do not send a real move. Stop: POST /api/drive/stop {} is a soft stop
+   (torque stays on, nothing latches). The camera page on your laptop (http://127.0.0.1:8820) has Stop too (Esc).
+
+If a move fails, the response / /api/drive "real.sequence" says which step stopped and why, and the arm holds where it is.

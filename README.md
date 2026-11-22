@@ -1,148 +1,666 @@
-# LauzHack 2026: eye-controlled pick and place with a remote SO-101 arm
+<div align="center">
 
-A person who cannot use their hands looks at a block on a screen, then at where it should go, and a robot arm in
-another country moves it. The arm, its cameras and the RAMION server are in **Poland**; the people using it are at
-LauzHack in Lausanne. Everything between them runs over **Tailscale**.
+# REACHA
 
-This page describes the system design. Each folder has its own README with the details.
+![banner](assets/images/Reacha_Assistive_Robotics_Banner.webp)
 
-## System architecture
 
-```mermaid
-flowchart LR
-  subgraph PL["Poland: RAMION lab"]
-    direction TB
-    ARM["SO-101 arm<br/>6 Feetech STS3215 servos"]
-    BUS["USB serial servo-bus adapter"]
-    CAMS["Cameras<br/>overhead 720p, wrist 1080p, observer"]
-    subgraph SRV["ramion-server-01 (Ubuntu 24.04, RTX 3060)<br/>Tailscale 100.85.56.14"]
-      CTRL["Controller :8765<br/>soarm (RAMION)"]
-      DASH["Dashboard :8780<br/>UI + API/camera proxy (RAMION)"]
-      AGENT["Arm agent :8790<br/>ours, token-protected"]
-    end
-    ARM --- BUS --- CTRL
-    CAMS --- CTRL
-    DASH --> CTRL
-    AGENT -->|"localhost-fast: joint targets,<br/>claim / heartbeat / stop"| DASH
-  end
+**An eye-tracking-based robotic arm control system designed to enable people with paralysis to perform everyday object manipulation tasks through gaze interaction.**
 
-  subgraph LAU["Lausanne: team laptops"]
-    direction TB
-    PAGE["Camera page :8820<br/>lauzkach_eye_robot_control<br/>rectangle + block detection, drive service"]
-    WEBUI["Manual control page :8800<br/>web_ui (keyboard jog, STOP)"]
-    SIM["MuJoCo simulator :8810<br/>digital twin"]
-    GAZE["Eye tracking<br/>gaze_service + Gaze Station app"]
-  end
+[![LauzHack 2026](https://img.shields.io/badge/Built_at-LauzHack_2026-009FB7?style=for-the-badge)](https://lauzhack.com/)
+[![Logitech Track](https://img.shields.io/badge/Track-Logitech-00B8FC?style=for-the-badge)](https://www.logitech.com/)
+[![JetBrains Track](https://img.shields.io/badge/Track-JetBrains-EB1191?style=for-the-badge)](https://www.jetbrains.com/)
+[![IMC Track](https://img.shields.io/badge/Track-IMC-555555?style=for-the-badge)](https://www.imc.com/)
 
-  PAGE -->|"overhead + wrist MJPEG (read-only)"| DASH
-  PAGE -->|"one command per step: /go, /grasp, /stop;<br/>polls /state"| AGENT
-  WEBUI -->|"state, cameras, control, jog, stop"| DASH
-  PAGE <--> SIM
-  GAZE -.->|"planned: select (u, v) / reset"| PAGE
-```
+<br/>
 
-### In Poland (RAMION's lab)
+[**Live Project Website**](https://claude.ai/artifact/NsY2vBKaEEffSLKGwzH8wE) · [**Source Code**](https://github.com/jakub-staudt/lauzhack_roboticarm)
 
-| Part | What it is | Owner |
-|---|---|---|
-| **SO-101 arm** | 5-axis arm + gripper, six Feetech STS3215 bus servos, connected to the server by a USB serial bus adapter. | RAMION |
-| **Cameras** | Overhead (Innomaker 720p) looking down on the table, wrist camera (1080p) on the gripper, an observer camera for people watching. | RAMION |
-| **Table** | Paper with a printed grid and AprilTags (36h11) at the corners. We work only in the **left 20 × 20 cm square**: the arm cannot reach the right part. | RAMION / us |
-| **ramion-server-01** | Ubuntu Server 24.04, RTX 3060. Runs RAMION's services; joined to the Tailscale network as `100.85.56.14`. | RAMION |
-| **Controller `:8765`** | `soarm` from RAMION's monorepo: talks to the servos at 20 Hz, owns the cameras, enforces the control lease, joint/EEPROM limits, the tip floor above the table, and the STOP latch. | RAMION |
-| **Dashboard `:8780`** | RAMION's operator UI. It also proxies the controller's `/api/...` and `/cameras/...` routes, keeps connections alive, and streams the cameras as MJPEG (2 to 20 fps). **Every laptop talks to the arm through here.** | RAMION |
-| **Arm agent `:8790`** | Our process (`lauzkach_eye_robot_control/arm_agent.py`) in the SSH user's home, started by hand in tmux, not at boot. It plans and drives a move next to the arm. Token-protected, Tailscale address only. | us |
+<br/>
 
-RAMION's services are not ours to change: we only call their public API. See `CLAUDE.md` for the rules
-(never break the server, ask before SSH or deploys, never move the real arm unsupervised, keep torque on).
+</div>
 
-### In Lausanne (laptops)
 
-| Part | Folder | Port | Role |
-|---|---|---|---|
-| **Camera page** | `lauzkach_eye_robot_control/` | 8820 | Finds the table rectangle (AprilTags + printed lines, fitted to one perspective grid, ~1 mm) and the blocks (by colour) in the overhead stream; maps pixels to table cm and to the arm's frame; the staged grasp / pick-and-place controls. Drives the simulator, or the real arm through the agent (`--real-agent`). |
-| **Manual control** | `web_ui/` | 8800 | Keyboard hold-to-move, take/release control, STOP; a same-origin proxy to the dashboard. |
-| **Real-arm library** | `robotic_arm/` | – | Calibration (table point ↔ arm frame), IK planning with `soarm_lab`, click-to-move. Used by the page and the agent. |
-| **Simulator** | `simulator/` | 8810 | MuJoCo SO-101 with the same table: a digital twin to try moves and grasp settings before the real arm (grasp search results in `simulator/grasp_search_results/`). |
-| **Eye tracking** | `gaze_pick_place.py`, `gaze_scene_v2.py`; `gaze_service/` + `kmp_app/` on branch `kmp-setup` | 8820* | EyeGestures on the laptop's camera; dwell to choose a block and a destination. The Gaze Station app (Kotlin Multiplatform, desktop + Android) currently drives the simulator. |
 
-\* `gaze_service` and the camera page both default to port 8820: run one of them on another port (`--port`) when
-both are needed.
 
-## Network
+---
 
-- **Tailscale** connects the laptops and the server. The path is usually **relayed through DERP Frankfurt**
-  (no direct connection was established): 40–55 ms round trip, with spikes of 360–900 ms and one two-minute outage
-  seen. `tailscale ping 100.85.56.14` shows the current path.
-- Nothing is exposed to the internet: the dashboard, controller and agent listen on the server's Tailscale address.
-- Bandwidth is shared: the overhead stream at 20 fps is about 660 KB/s, the wrist stream about 350 KB/s.
-  The camera page uses 2 fps by default.
+## Overview
 
-## How a pick and place runs
+What if someone could interact with the physical world without moving their hands?
 
-```mermaid
-sequenceDiagram
-  participant U as User (eyes or mouse)
-  participant P as Camera page (laptop)
-  participant A as Arm agent (server)
-  participant D as Dashboard / controller (server)
-  participant R as SO-101
-  U->>P: click a block, click the destination, press "Move the block"
-  P->>P: block pixel -> table cm -> arm frame (calibration)
-  loop each step: open, hover, lower, grip, lift, carry, place (lower, release, rise, park)
-  P->>A: POST /grasp {action, x, y, yaw} (token)
-  A->>A: plan with IK (hover 66-78 deg tilt, centred on the jaws)
-  A->>D: claim control, then joint targets + heartbeats every 250 ms
-  D->>R: servo commands (20 Hz feedback)
-  loop during the move
-    P->>A: GET /state (keeps the dead-man alive)
-    A-->>P: progress, stage, messages
-  end
-  A->>D: release control
-  end
-  P->>U: done, or the step and reason it stopped
-```
+For people living with severe motor impairments, even simple everyday actions - moving an object, reaching for something, or interacting with their surroundings - can require assistance from another person.
 
-`pickplace.py` runs the steps one after another and stops at the first failure or Stop, saying which step and why;
-if the arm already holds a block it carries on from *carry*. *Put the block back* and the park buttons remain.
+**REACHA** explores a different approach: using eye movements as a natural input mechanism to control a physical robotic arm remotely.
 
-**Why the agent runs in Poland.** A move is about 70 joint steps, each with heartbeats and state polls: hundreds of
-round trips. Over the relayed link that made the arm crawl, and one latency spike let the 1.5 s control lease
-expire in the middle of a move. Next to the controller those round trips take about 1 ms, and the laptop sends one
-small command per step (`POST /grasp`, `/go`, `/stop`; `GET /state`). The laptop can still drive the dashboard directly (`--real-arm`) as a fallback.
+By combining computer vision, eye tracking, robotic manipulation and cross-platform software, REACHA enables a user to select and manipulate physical objects simply by looking at them.
 
-## Safety layers
+The user interacts with a virtual representation of a physical workspace displayed on a screen. By maintaining their gaze on an object for approximately three seconds, they select it. They can then choose a destination and initiate a robotic manipulation task.
 
-| Layer | Where | What it does |
-|---|---|---|
-| A person supervises | Lausanne | A person starts every real-arm move and watches it; **Stop (Esc)** stays in reach and ends the sequence at any step. |
-| Soft stop | page / agent | `POST /stop` is never queued behind a move; holds the pose. Not an emergency stop: nothing latches. |
-| Dead-man | agent | If no laptop polls `/state` for 4 s during a move, the agent holds the arm. |
-| Control lease | controller | Only one owner at a time; control is lost after 1.5 s without a heartbeat. |
-| Planning checks | `robotic_arm`, agent | Hover ≥ 3 cm, joint limits, no joint jumps > 35°, tip kept above the table floor, gripper and other-owner checks, control claimed only after planning. |
-| Lowering watch | agent | The wrist camera stops the lowering when the block's lower edge reaches the bottom of its picture. |
-| Controller limits | controller | EEPROM joint limits, tip floor above the table, STOP latch (RAMION's emergency stop, reset needs its generation number). |
-| Unchanged settings | everywhere | Our code never changes torque or the controller's speed and never latches the emergency stop. |
+The robotic arm executes the requested movement in a remote physical environment, while the user remains in control through an accessible visual interface.
 
-## Status (2026-11-22)
+**The result is a system that transforms visual attention into physical interaction.**
 
-- Working on the real arm: picking a block and putting it back (open, hover, lower, grip, lift, put back, park);
-  colour block detection; rectangle detection and calibration; the digital twin.
-- Newest (commit `a786bc5`): **one-button pick and place to a chosen destination** (carry and place steps). Check
-  with the team whether it has been run on the real arm yet.
-- Not done yet: connecting the eye tracking to the real arm (the agreed message format is in
-  `eye_tracking/README.md`: `select` / `reset` with rectangle coordinates `u, v`).
-- The Gaze Station app (macOS, Windows, Ubuntu, Android) and its releases are on branch `kmp-setup`; it moves the
-  simulator only.
+---
 
-## Where to start
+## The problem
 
-| I want to… | Read |
+Traditional robotic interfaces rely on physical input devices:
+
+- Mouse and keyboard.
+- Touchscreens.
+- Joysticks and controllers.
+- Physical buttons.
+
+These interaction methods can be inaccessible to people with conditions that severely restrict voluntary movement.
+
+Eye tracking offers an alternative input modality: instead of requiring physical interaction, the system interprets where the user is looking.
+
+REACHA takes this concept beyond conventional eye-controlled interfaces. Rather than simply moving a cursor or navigating a screen, it connects visual attention to the manipulation of real-world objects.
+
+Our goal is to make robotic interaction more accessible, intuitive and independent.
+
+---
+
+## The solution
+
+REACHA combines three main components:
+
+1. **Eye Tracking:** a Logitech MX BRIO camera captures the user's eye movements and determines their point of visual attention.
+2. **Interaction Interface:** a visual workspace allows the user to select objects and specify manipulation commands through gaze-based interaction.
+3. **Robotic Manipulation:** a remotely connected SO-101 robotic arm performs the corresponding physical actions.
+
+The system follows a simple interaction model:
+
+1. The user looks at an object on the screen.
+2. The eye-tracking system detects a stable gaze position.
+3. A dwell-time mechanism confirms the selection after approximately three seconds.
+4. The user selects a destination or another available action.
+5. The application translates the selection into workspace coordinates.
+6. The robotic system plans and executes the corresponding movement.
+7. The user can observe the result through the remote camera feed.
+
+The interface also provides alternative interaction mechanisms, including direct point selection and explicit movement confirmation.
+
+---
+
+## Demonstration
+
+**A remote robotic workspace controlled through eye tracking.**
+
+![img2](assets/images/63fd7e05-042b-4bba-8d19-e8d7226d55cd.png)
+
+The physical robotic arm is located in Poland, while the user interacts with the system from a device.
+
+The application displays a representation of the remote workspace, allowing the user to interact with objects without physically accessing the robot or its environment.
+
+The communication architecture connects the local interaction interface to the remote robotic infrastructure.
+
+<!-- Add demonstration GIF or video here -->
+<!-- Example: ![REACHA demonstration](assets/reacha-demo.gif) -->
+
+### Example interaction
+
+| User action | System response |
 |---|---|
-| Run the camera page / drive the arm | `lauzkach_eye_robot_control/README.md`, `docs/AGENT_DEPLOY.md` |
-| Control the arm by keyboard | `web_ui/README.md` |
-| Calibrate the real arm | `robotic_arm/README.md` |
-| Run the simulator | `simulator/README.md` |
-| Work on eye tracking | `eye_tracking/README.md`, `gaze_scene_v2.py`; the app on branch `kmp-setup` (`kmp_app/README.md`) |
-| Understand RAMION's server | `monorepo-main/docs/server-ops.md`, `TEAM_HANDOFF.md`, `deployment.md` |
-| The rules for working on the real arm | `CLAUDE.md` |
+| Looks at a red cube | Gaze position is tracked |
+| Maintains gaze for 3 seconds | Red cube is selected |
+| Selects a destination | Target position is registered |
+| Confirms the operation | Manipulation task is initiated |
+| Robot completes the movement | Cube reaches its destination |
+
+---
+
+# System Architecture
+
+REACHA is designed as a modular, distributed system. Its architecture separates visual input, interaction logic, geometric transformations, robotic planning and hardware execution.
+
+This separation allows individual components to be developed, tested and improved independently.
+
+
+![img3](assets/images/Reacha_Gaze-Control_Robotics_System_Architecture.webp)
+
+
+## Component architecture
+
+### 1. Eye Tracking Layer
+
+The eye-tracking subsystem uses a Logitech MX BRIO camera to capture the user's visual input.
+
+Its responsibility is to convert eye movements into meaningful screen coordinates.
+
+The interaction model uses dwell-based selection:
+
+- Gaze coordinates are continuously estimated.
+- A stable point of attention is identified.
+- A dwell timer measures how long the user maintains their gaze.
+- Once the threshold is reached, a selection event is generated.
+
+The eye-tracking subsystem communicates with the rest of the application through a lightweight JSON event contract.
+
+Example selection event:
+
+```json
+{
+  "type": "select",
+  "u": 0.42,
+  "v": 0.71
+}
+```
+
+Coordinates are normalized to the workspace:
+
+- `u`: horizontal position, between 0 and 1.
+- `v`: vertical position, between 0 and 1.
+
+Additional events support resetting the interaction state and optionally transmitting live gaze positions.
+
+This interface decouples gaze estimation from robotic control: the robotics subsystem does not need to know how the user's eyes are tracked.
+
+### 2. Interaction Layer
+
+The interaction layer translates user intent into manipulation commands.
+
+The user sees a visual representation of the workspace, including the available objects and their possible destinations.
+
+The interface supports:
+
+- Object selection.
+- Destination selection.
+- Move commands.
+- Explicit movement confirmation.
+- Emergency stop and movement cancellation.
+- Workspace reset.
+- Visual feedback from the remote environment.
+
+The application maintains the interaction state and coordinates the transition from user selection to robotic execution.
+
+### 3. Coordinate Transformation and Calibration
+
+A fundamental challenge in remote robotic manipulation is ensuring that a point selected on a screen corresponds to the correct physical location on the robot's table.
+
+REACHA addresses this through workspace calibration and geometric transformations.
+
+The system works with normalized workspace coordinates and maps them to the robotic arm's coordinate frame.
+
+Calibration uses known reference points on the workspace and the corresponding positions measured by the robot.
+
+A planar homography provides the mapping between normalized table coordinates and the robot's base-frame coordinates.
+
+Conceptually:
+
+$$
+(u,v) \longrightarrow (x,y)
+$$
+
+where:
+
+- \((u,v)\) represents a normalized position on the workspace.
+- \((x,y)\) represents the corresponding position in the robot's coordinate frame.
+
+The calibration module also evaluates residual errors to assess the quality of the transformation.
+
+This geometric layer is essential for reliable manipulation: an accurate gaze selection is not sufficient if the corresponding physical position is incorrectly estimated.
+
+### 4. Robotic Planning and Execution
+
+The robotic subsystem is responsible for translating target coordinates into executable movements.
+
+REACHA integrates with the SO-101 robotic arm and its underlying RAMION control infrastructure.
+
+The robotics pipeline includes:
+
+- Workspace calibration.
+- Inverse kinematics.
+- Joint-space trajectory planning.
+- Motion execution.
+- Controller communication.
+- Movement monitoring and cancellation.
+
+The motion planner uses the robot's kinematic model to determine feasible joint configurations for a desired end-effector position.
+
+A pick-and-place operation can be represented as a sequence of waypoints:
+
+1. Move above the source object.
+2. Approach the object.
+3. Grasp the object.
+4. Lift it from the workspace.
+5. Move towards the destination.
+6. Lower and release the object.
+7. Return to a safe configuration.
+
+Motion planning is separated from execution, allowing trajectories to be evaluated independently before being sent to the physical controller.
+
+### 5. Remote Communication
+
+The physical robot and the user's interface operate in separate environments.
+
+Communication is handled through HTTP-based services and JSON messages.
+
+The system uses a proxy layer to expose the required controller functionality to the user-facing applications.
+
+This architecture supports:
+
+- Remote camera access.
+- Robot state monitoring.
+- Control ownership management.
+- Movement commands.
+- Heartbeat and session management.
+- Stop and cancellation operations.
+
+The system is designed to account for network latency and intermittent connectivity, which are particularly relevant when controlling hardware remotely.
+
+---
+
+# JetBrains Track: Kotlin Multiplatform Architecture
+
+REACHA includes a dedicated Kotlin Multiplatform application developed as part of the JetBrains challenge.
+
+The objective was to build a native-feeling application that can serve as the interaction interface for the robotic workspace, while keeping the application logic independent of the operating system.
+
+Instead of implementing the same interface and interaction logic separately for different platforms, we use **Compose Multiplatform and Kotlin Multiplatform (KMP)** to share the application code.
+
+## Architecture overview
+
+The current application targets the JVM Desktop environment, supporting macOS, Windows and Linux.
+
+Its architecture separates shared application logic from platform-specific implementations.
+
+
+## Shared application layer
+
+The `commonMain` source set contains the core application functionality.
+
+It is responsible for:
+
+- UI composition and reusable interface components.
+- Application state management.
+- User interaction logic.
+- Workspace geometry and coordinate transformations.
+- API communication.
+- Data models and serialization.
+
+The shared layer is implemented using:
+
+| Technology | Responsibility |
+|---|---|
+| Kotlin | Application language |
+| Compose Multiplatform | Declarative UI |
+| Ktor Client | HTTP communication |
+| Kotlinx Serialization | JSON serialization and deserialization |
+| Kotlin Coroutines | Asynchronous operations |
+
+The shared architecture ensures that application behaviour is not tightly coupled to a specific desktop operating system.
+
+## Desktop platform layer
+
+The `desktopMain` source set provides the platform-specific implementations required by the desktop application.
+
+It includes:
+
+- Desktop application entry point.
+- Window and application lifecycle.
+- Skia-based image decoding.
+- Ktor CIO HTTP engine.
+- Desktop-specific coroutine integration.
+
+The platform abstraction uses Kotlin's `expect` / `actual` mechanism for functionality that requires different implementations across targets.
+
+For example, image decoding is declared in the shared code and implemented specifically for Desktop.
+
+## Code organization
+
+The Kotlin application follows this structure:
+
+```text
+kmp_app/
+├── composeApp/
+│   └── src/
+│       ├── commonMain/
+│       │   └── kotlin/ch/lauzhack/gaze/
+│       │       ├── api/
+│       │       │   ├── Models.kt
+│       │       │   └── StationApi.kt
+│       │       ├── Geometry.kt
+│       │       ├── StationController.kt
+│       │       ├── Platform.kt
+│       │       └── ui/
+│       │           ├── Theme.kt
+│       │           ├── App.kt
+│       │           ├── CameraView.kt
+│       │           └── ControlPanel.kt
+│       │
+│       └── desktopMain/
+│           └── kotlin/ch/lauzhack/gaze/
+│               ├── Main.kt
+│               ├── Platform.desktop.kt
+│               └── Snapshot.kt
+│
+├── gradle/
+├── gradlew
+└── build.gradle.kts
+```
+
+### Main architectural responsibilities
+
+| Component | Responsibility |
+|---|---|
+| `StationController.kt` | Application state and interaction orchestration |
+| `Geometry.kt` | Coordinate transformations between screen pixels, workspace and block coordinates |
+| `StationApi.kt` | Communication with the Python backend |
+| `Models.kt` | API data models |
+| `App.kt` | Main Compose application interface |
+| `CameraView.kt` | Workspace camera visualization |
+| `ControlPanel.kt` | User interaction and robotic controls |
+| `Platform.kt` | Platform-independent declarations |
+| `Platform.desktop.kt` | Desktop-specific implementations |
+| `Main.kt` | Desktop application entry point |
+
+## Multiplatform design strategy
+
+A central design decision was to keep the majority of the application in `commonMain`.
+
+This means that adding new platforms does not require rewriting the interaction logic or the workspace geometry.
+
+The architecture is designed to support future targets such as:
+
+- Android.
+- iOS.
+- Additional desktop environments.
+
+These targets require their own platform configuration and implementations where necessary.
+
+The repository also contains a separate `mobile_app/` directory for the native iPhone application prototype.
+
+**The current Compose Multiplatform client is a Desktop application; Android, iOS and Web are architectural extension points rather than currently supported targets of this client.**
+
+## Running the Kotlin application
+
+Requirements:
+
+- JDK 17.
+- Gradle (the project includes the Gradle wrapper).
+- Python environment running the simulator backend.
+
+Start the backend from the repository root:
+
+```bash
+python3 -m venv .venv-sim
+source .venv-sim/bin/activate
+
+pip install -r simulator/requirements.txt
+
+python -m simulator.web.server
+```
+
+The simulator server is available at:
+
+```text
+http://127.0.0.1:8810
+```
+
+In another terminal:
+
+```bash
+cd kmp_app
+
+./gradlew :composeApp:run
+```
+
+To connect to another server:
+
+```bash
+./gradlew :composeApp:run --args="http://HOST:8810"
+```
+
+Alternatively, configure the server URL through the `GAZE_STATION_URL` environment variable.
+
+The desktop application can also be packaged for the supported operating systems:
+
+```bash
+./gradlew :composeApp:packageDmg
+./gradlew :composeApp:packageMsi
+./gradlew :composeApp:packageDeb
+```
+
+Each native package must be built on its corresponding operating system.
+
+---
+
+# Technology Stack
+
+REACHA brings together technologies from computer vision, robotics, distributed systems and cross-platform application development.
+
+| Domain | Technologies |
+|---|---|
+| Eye Tracking | Logitech MX BRIO, gaze estimation, dwell-based selection |
+| Application Development | Kotlin, Kotlin Multiplatform |
+| UI Framework | Compose Multiplatform |
+| Networking | Ktor, HTTP, JSON |
+| Serialization | Kotlinx Serialization |
+| Concurrency | Kotlin Coroutines |
+| Robotics | SO-101, RAMION |
+| Motion Planning | Inverse Kinematics, trajectory planning |
+| Simulation | MuJoCo, Gazebo |
+| Computer Vision | OpenCV, AprilTags, perspective geometry |
+| Backend | Python, HTTP services |
+| Remote Connectivity | Tailscale |
+| Development Environment | IntelliJ IDEA, Gradle |
+
+---
+
+# Repository Structure
+
+The project is organized into independent modules, each responsible for a specific part of the system.
+
+```text
+REACHA/
+│
+├── eye_tracking/
+│   └── Gaze detection, dwell selection and
+│       communication interface
+│
+├── kmp_app/
+│   └── Kotlin Multiplatform desktop application
+│       ├── Shared Compose UI
+│       ├── Application state
+│       ├── Geometry
+│       └── API integration
+│
+├── mobile_app/
+│   └── Native iOS application prototype
+│
+├── lauzkach_eye_robot_control/
+│   └── Camera-based workspace detection,
+│       geometric alignment and correction
+│
+├── robotic_arm/
+│   └── Robotic control and motion planning
+│       ├── calibration.py
+│       ├── planner.py
+│       ├── executor.py
+│       └── config.py
+│
+├── simulator/
+│   └── Virtual robotic environment
+│       ├── MuJoCo simulation
+│       ├── Gazebo integration
+│       ├── Web interface
+│       └── Workspace geometry
+│
+├── web_ui/
+│   └── Remote robotic control interface
+│
+├── monorepo-main/
+│   └── RAMION robotic infrastructure
+│
+├── gaze_pick_place.py
+├── gaze_scene_v2.py
+├── requirements.txt
+└── README.md
+```
+
+### Module responsibilities
+
+| Module | Description |
+|---|---|
+| `eye_tracking/` | Converts visual attention into normalized interaction events |
+| `kmp_app/` | Cross-platform application architecture and desktop UI |
+| `mobile_app/` | Native iOS application prototype |
+| `lauzkach_eye_robot_control/` | Camera-based workspace detection and geometric alignment |
+| `robotic_arm/` | Calibration, inverse kinematics and robotic execution |
+| `simulator/` | Virtual environment for development and testing |
+| `web_ui/` | Remote camera visualization and robotic control |
+| `monorepo-main/` | Underlying RAMION robotic control infrastructure |
+
+---
+
+# Simulation and Testing
+
+REACHA includes a simulation environment based on MuJoCo, allowing the robotic workspace and its interactions to be tested without requiring continuous access to the physical hardware.
+
+The simulator models:
+
+- The SO-101 robotic arm.
+- The manipulation table.
+- The available objects.
+- The gripper.
+- The overhead camera.
+- The robot's kinematic configuration.
+
+It provides a web interface through which users can select objects and destinations.
+
+The same interaction model can be used with the Kotlin application, allowing the user-facing software to communicate with a simulated robotic environment through the same API.
+
+### Running the simulator
+
+From the repository root:
+
+```bash
+python3 -m venv .venv-sim
+source .venv-sim/bin/activate
+
+pip install -r simulator/requirements.txt
+
+python -m simulator.web.server
+```
+
+Open:
+
+```text
+http://127.0.0.1:8810
+```
+
+To launch the interactive MuJoCo viewer:
+
+```bash
+python -m simulator.run
+```
+
+On macOS:
+
+```bash
+mjpython -m simulator.run
+```
+
+Gazebo is also supported as an alternative simulation backend.
+
+---
+
+# Installation and Setup
+
+## Prerequisites
+
+Depending on which components you want to run, you will need:
+
+- Python 3.
+- JDK 17.
+- Git.
+- Gradle (wrapper included).
+- MuJoCo dependencies.
+- OpenCV dependencies for the computer vision modules.
+- Access to the robotic controller for physical hardware operation.
+
+## Clone the repository
+
+```bash
+git clone https://github.com/jakub-staudt/lauzhack_roboticarm.git
+
+cd lauzhack_roboticarm
+```
+
+## Python environment
+
+Create an environment for the simulator:
+
+```bash
+python3 -m venv .venv-sim
+
+source .venv-sim/bin/activate
+
+pip install -r simulator/requirements.txt
+```
+
+For the robotic arm module, use its dedicated environment:
+
+```bash
+cd robotic_arm
+
+python3 -m venv .venv
+
+.venv/bin/pip install mujoco numpy scipy pyyaml pytest
+
+.venv/bin/pip install --no-deps -e ../monorepo-main/apps/arm-workbench/packages/soarm
+
+.venv/bin/pip install --no-deps -e ../monorepo-main/apps/arm-workbench/packages/soarm_lab
+
+.venv/bin/pip install --no-deps -e .
+```
+
+Configure the robotic controller using the example configuration:
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+Set the appropriate controller endpoint in `config.yaml`.
+
+## Kotlin application
+
+```bash
+cd kmp_app
+
+./gradlew :composeApp:run
+```
+
+Make sure the simulator or the intended backend is running before launching the client.
+
+---
+
+# Future Development
+
+## Binocular / Stereo Vision
+
+The current configuration uses a single camera for gaze input.
+
+A natural extension would be to introduce a second camera:
+
+- An eye-facing camera dedicated to tracking the user's gaze.
+- A forward-facing camera observing the user's environment.
+
+Combining the two sources could provide a richer representation of the user's visual attention and physical surroundings.
+
+With appropriate calibration and camera geometry, this could support a more complete spatial representation of the environment.
+
+Potential benefits include improved spatial interaction, contextual object selection and more natural control.
+
+---
+
+
+<div align="center">
+
+### REACHA
+
+[Live Website](https://claude.ai/artifact/NsY2vBKaEEffSLKGwzH8wE) · [GitHub Repository](https://github.com/jakub-staudt/lauzhack_roboticarm)
+
+</div>
