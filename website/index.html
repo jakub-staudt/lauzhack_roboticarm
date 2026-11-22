@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reacha — Gaze-controlled assistive robotics</title>
+<meta name="description" content="Reacha lets you direct a robotic arm through intentional eye movement. Try the simulated control workspace.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --teal:#174B50; --graphite:#202B30; --muted-teal:#65B9AE; --canvas:#F4F6F6;
+  --surface:#FFFFFF; --selected:#E7F2F0; --border:#D9E1E3; --muted:#52636B;
+  --red:#A52E35; --caution:#845514;
+  --r-control:8px; --r-panel:12px;
+  --font:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:var(--font);background:var(--canvas);color:var(--graphite);font-size:16px;line-height:24px;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--muted-teal);outline-offset:2px}
+.wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+.eyebrow{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--teal)}
+h1,h2,h3{font-weight:600;letter-spacing:-.02em}
+.skip{position:absolute;left:-999px;top:8px;background:var(--teal);color:#fff;padding:8px 16px;border-radius:8px;z-index:100}
+.skip:focus{left:8px}
+
+/* nav */
+header.nav{position:sticky;top:0;z-index:50;background:rgba(244,246,246,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+.nav .wrap{display:flex;align-items:center;justify-content:space-between;height:68px}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:600;font-size:24px;letter-spacing:-.03em;color:var(--teal)}
+.logo svg{height:30px;width:auto}
+.nav ul{display:flex;gap:32px;list-style:none;align-items:center}
+.nav ul a{text-decoration:none;font-size:14px;font-weight:500}
+.nav ul a:hover{color:var(--teal);text-decoration:underline;text-underline-offset:6px}
+.btn{display:inline-flex;align-items:center;gap:10px;background:var(--teal);color:#fff;border:1px solid var(--teal);padding:12px 20px;border-radius:var(--r-control);font-weight:600;font-size:14px;text-decoration:none;min-height:44px;transition:background .15s}
+.btn:hover{background:#0f3a3e}
+.btn.ghost{background:transparent;color:var(--teal);border-color:var(--teal)}
+.btn.ghost:hover{background:var(--selected)}
+.btn svg{width:18px;height:18px}
+@media(max-width:760px){.nav ul li:not(:last-child){display:none}}
+
+/* icons */
+.ic{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+/* hero */
+.hero{padding:56px 0 72px}
+.hero .wrap{display:grid;grid-template-columns:1.05fr 1fr;gap:56px;align-items:center}
+.hero h1{font-size:clamp(44px,6.4vw,72px);line-height:1.08;margin:16px 0 20px}
+.hero p.lead{font-size:20px;line-height:30px;color:var(--muted);max-width:30em}
+.hero .cta{display:flex;gap:12px;margin-top:32px;flex-wrap:wrap}
+.hero-art{position:relative;aspect-ratio:1/1;max-height:560px;border-radius:var(--r-panel);overflow:hidden;background:var(--teal)}
+.hero-art svg{position:absolute;inset:0;width:100%;height:100%}
+.trace{stroke-dasharray:900;stroke-dashoffset:900;animation:draw 2.6s .3s cubic-bezier(.4,0,.2,1) forwards}
+.trace.t2{animation-delay:.5s}.trace.t3{animation-delay:.7s}
+@keyframes draw{to{stroke-dashoffset:0}}
+@media(max-width:900px){.hero .wrap{grid-template-columns:1fr}.hero-art{max-height:380px;aspect-ratio:16/10}}
+
+
+/* hero (banner style) */
+.hero2{position:relative;background:#103f44 url(assets/hero-bg.webp) 78% center/cover no-repeat;color:#fff;min-height:clamp(540px,calc(100vw*0.5625),820px);display:flex;align-items:center}
+.hero2::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(11,52,57,.55) 0%,rgba(11,52,57,0) 55%);pointer-events:none}
+.hero2-in{position:relative;width:100%;padding-top:64px;padding-bottom:64px}
+.hero2-logo{display:block;width:clamp(260px,34vw,520px);height:auto}
+.hero2-tag{margin-top:clamp(14px,2vw,26px);font-size:clamp(12px,1.5vw,19px);line-height:1.4;font-weight:500;letter-spacing:.3em;text-transform:uppercase;color:#E3EEEE}
+.hero2-feat{list-style:none;display:flex;flex-wrap:wrap;gap:0;margin-top:clamp(28px,5vw,64px)}
+.hero2-feat li{display:flex;align-items:center;gap:14px;padding:0 28px;font-size:clamp(14px,1.45vw,18px);line-height:1.3;font-weight:500;color:#F4F6F6}
+.hero2-feat li:first-child{padding-left:0}
+.hero2-feat li+li{border-left:1px solid rgba(255,255,255,.28)}
+.hero2-feat .ic{width:clamp(30px,3.2vw,42px);height:clamp(30px,3.2vw,42px);color:#8fd3c8}
+.hero2-cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:clamp(28px,4vw,48px)}
+.btn.on-dark{background:#fff;color:var(--teal);border-color:#fff}.btn.on-dark:hover{background:var(--selected)}
+.btn.ghost-light{background:transparent;color:#fff;border-color:rgba(255,255,255,.55)}.btn.ghost-light:hover{background:rgba(255,255,255,.12)}
+@media(max-width:860px){
+  .hero2{background-size:auto 62%;background-position:62% 100%;align-items:flex-start;min-height:860px}
+  .hero2::before{background:linear-gradient(180deg,#103f44 0%,#103f44 40%,rgba(16,63,68,0) 62%)}
+  .hero2-feat li{padding:8px 18px 8px 0}.hero2-feat li+li{border-left:0}
+}
+
+/* architecture */
+#architecture{background:var(--graphite);color:#fff}
+#architecture .eyebrow{color:var(--muted-teal)}
+#architecture .sec-head p{color:#B7C4C9}
+.arch-wrap{max-width:1480px}
+.arch-panel{background:#161F23;border:1px solid #2F3D43;border-radius:16px;padding:28px 28px 24px}
+.arch-svg{display:block;width:100%;height:auto}
+.arch-svg text{font-family:var(--font)}
+.a-col{fill:none;stroke:#2F3D43;stroke-width:1.2}
+.a-num{fill:var(--muted-teal);font-size:17px;font-weight:700;letter-spacing:.06em}
+.a-head{fill:#fff;font-size:17px;font-weight:600;letter-spacing:.1em}
+.a-rule{stroke:#2F3D43;stroke-width:1.5}
+.a-card{fill:#202B30;stroke:#3B4D55;stroke-width:1.5}
+.a-card.emph{fill:#1d3a3d;stroke:var(--muted-teal);stroke-width:1.8}
+.a-ic{fill:none;stroke:var(--muted-teal);stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
+.a-title{fill:#fff;font-size:21px;font-weight:600;letter-spacing:-.01em}
+.a-sub{fill:#B7C4C9;font-size:17px;font-weight:400}
+.a-lab{fill:#B7C4C9;font-size:16px;font-weight:500}
+.a-lab.ctl{fill:var(--muted-teal)}.a-lab.sft{fill:#E3A94B}
+.a-tagbg{fill:#161F23}
+.a-tag{fill:#E7F2F0;font-size:14px;font-weight:600;letter-spacing:.12em}
+.a-line{fill:none;stroke-linecap:round;stroke-linejoin:round}
+.a-line.ctl{stroke:var(--muted-teal);stroke-width:2.8}
+.a-line.vid{stroke:#E7F2F0;stroke-width:2.2;stroke-dasharray:9 6}
+.a-line.sft{stroke:#E3A94B;stroke-width:2.2;stroke-dasharray:3 6}
+.a-line.gaze{stroke:#9FB0B6;stroke-width:2}
+.mk-ctl{fill:var(--muted-teal)}.mk-vid{fill:#E7F2F0}.mk-sft{fill:#E3A94B}.mk-gaze{fill:#9FB0B6}
+.a-node{transition:opacity .15s}
+.arch-foot{display:flex;gap:56px;flex-wrap:wrap;align-items:flex-start;border-top:1px solid #2F3D43;margin-top:22px;padding-top:20px}
+.arch-legend{display:flex;gap:28px;align-items:center;flex-wrap:wrap;font-size:14px;color:#E4ECEE}
+.arch-legend b,.arch-note b{font-size:12px;font-weight:600;letter-spacing:.14em;color:#9FB0B6;display:block}
+.arch-legend b{width:100%;margin-bottom:-12px}
+.arch-legend span{display:inline-flex;align-items:center;gap:10px}
+.arch-note{max-width:48ch;font-size:14px;line-height:20px;color:#B7C4C9}.arch-note b{margin-bottom:6px}
+.arch-list{display:none}
+@media(max-width:1100px){
+  .arch-svg{display:none}.arch-list{display:block}
+  .arch-panel{padding:20px}
+  .al-layer{border:1px solid #2F3D43;border-radius:12px;padding:16px}
+  .al-head{font-size:12px;font-weight:600;letter-spacing:.14em;color:#fff;margin-bottom:12px}
+  .al-head span{color:var(--muted-teal);margin-right:12px}
+  .al-item{display:flex;gap:14px;background:#202B30;border:1px solid #3B4D55;border-radius:8px;padding:14px;margin-top:8px}
+  .al-item .ic{color:var(--muted-teal);width:26px;height:26px}
+  .al-item b{display:block;font-weight:600;font-size:16px;line-height:22px}
+  .al-item span{display:block;font-size:14px;line-height:20px;color:#B7C4C9;margin-top:2px}
+  .al-link{font-size:13px;line-height:18px;font-weight:500;color:var(--muted-teal);padding:12px 8px}
+  .al-link.vid{color:#E7F2F0}
+}
+
+/* benefit strip */
+.strip{background:var(--surface);border-block:1px solid var(--border)}
+.strip .wrap{display:grid;grid-template-columns:repeat(3,1fr)}
+.strip .item{display:flex;gap:16px;padding:28px 24px;align-items:flex-start}
+.strip .item+.item{border-left:1px solid var(--border)}
+.strip .ic{color:var(--teal);width:32px;height:32px}
+.strip h3{font-size:16px;line-height:24px}
+.strip p{font-size:14px;line-height:20px;color:var(--muted);margin-top:4px}
+@media(max-width:760px){.strip .wrap{grid-template-columns:1fr}.strip .item+.item{border-left:0;border-top:1px solid var(--border)}}
+
+section{padding:96px 0}
+.sec-head{max-width:640px;margin-bottom:48px}
+.sec-head h2{font-size:clamp(32px,4.2vw,40px);line-height:1.2;margin:12px 0 12px}
+.sec-head p{color:var(--muted);font-size:18px;line-height:28px}
+
+/* LIVE LAB */
+#lab{background:var(--graphite);color:#fff;padding:96px 0}
+#lab .eyebrow{color:var(--muted-teal)}
+#lab .sec-head p{color:#B7C4C9}
+.lab{background:#161F23;border:1px solid #2F3D43;border-radius:16px;overflow:hidden}
+.lab-top{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #2F3D43;flex-wrap:wrap}
+.lab-title{display:flex;align-items:center;gap:12px;font-weight:600}
+.lab-title small{font-weight:500;color:#9FB0B6;font-size:13px}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:8px;font-size:13px;line-height:16px;font-weight:500;padding:6px 12px;border-radius:999px;background:#202B30;border:1px solid #33444B;color:#E4ECEE}
+.chip i{width:8px;height:8px;border-radius:50%;background:var(--muted-teal);display:block}
+.chip.warn i{background:#E3A94B}.chip.bad i{background:#E5636B}
+.chip.sim{background:#2a2a1c;border-color:#5b4a1f;color:#F1D79B}
+.chip.sim i{border-radius:2px;background:#E3A94B}
+.lab-main{display:grid;grid-template-columns:minmax(0,1fr) 340px}
+.viewport{position:relative;min-height:440px;background:#1B252A}
+.viewport canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+.viewport canvas:active{cursor:grabbing}
+.vp-label{position:absolute;font-size:12px;line-height:16px;font-weight:600;letter-spacing:.06em;padding:6px 10px;border-radius:6px;background:rgba(14,20,23,.78);color:#E4ECEE;pointer-events:none}
+.vp-label.tl{top:14px;left:14px}.vp-label.tr{top:14px;right:14px}
+.vp-label.bl{bottom:14px;left:14px}.vp-label.br{bottom:14px;right:14px;color:#B7C4C9;font-weight:500;letter-spacing:0}
+.cams{position:absolute;top:14px;left:50%;transform:translateX(-50%);display:flex;background:rgba(14,20,23,.78);border-radius:8px;padding:3px;gap:2px}
+.cams button{background:none;border:0;color:#B7C4C9;font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;min-height:28px}
+.cams button[aria-pressed=true]{background:var(--muted-teal);color:#0f2a2d}
+.lockbanner{position:absolute;inset:auto 14px 52px 14px;display:none;align-items:center;gap:12px;background:rgba(165,46,53,.94);padding:12px 16px;border-radius:8px;font-size:14px;line-height:20px;font-weight:500}
+.lockbanner.on{display:flex}
+.loadmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(14,20,23,.85);color:#E4ECEE;padding:12px 18px;border-radius:8px;font-size:14px;font-weight:500;z-index:2}
+.lockbanner b{font-weight:600}
+
+.panel{background:#202B30;border-left:1px solid #2F3D43;padding:20px;display:flex;flex-direction:column;gap:18px}
+.panel h3{font-size:16px;display:flex;justify-content:space-between;align-items:baseline}
+.panel h3 span{font-size:11px;letter-spacing:.12em;font-weight:600;color:#9FB0B6}
+.plabel{font-size:12px;font-weight:500;color:#9FB0B6;margin-bottom:8px;display:flex;justify-content:space-between}
+.dirs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tgt{position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:68px;background:#2A383E;border:1px solid #3B4D55;border-radius:var(--r-control);color:#fff;font-size:13px;font-weight:500;transition:background .12s,border-color .12s}
+.tgt .ic{width:22px;height:22px}
+.tgt::after{content:"";position:absolute;left:0;bottom:0;height:4px;width:calc(var(--p,0)*100%);background:var(--muted-teal)}
+.tgt:hover{border-color:var(--muted-teal)}
+.tgt.dwell{background:#2f4a4d}
+.tgt.sel{background:var(--selected);color:var(--teal);border-color:var(--muted-teal);box-shadow:inset 0 0 0 1.5px var(--muted-teal)}
+.tgt[aria-disabled=true]{opacity:.4;cursor:not-allowed}
+.grip{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grip .tgt{flex-direction:row;min-height:52px}
+.pending{border-top:1px solid #3B4D55;padding-top:16px}
+.pending .cmd{display:flex;align-items:center;gap:8px;font-weight:600}
+.pending .sub{font-size:13px;line-height:18px;color:#9FB0B6;margin:4px 0 12px}
+.row2{display:grid;grid-template-columns:1fr 1.5fr;gap:8px}
+.pbtn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;border-radius:var(--r-control);border:1px solid #3B4D55;background:transparent;color:#fff;font-weight:600;font-size:14px}
+.pbtn.go{background:var(--muted-teal);border-color:var(--muted-teal);color:#0f2a2d}
+.pbtn:disabled{opacity:.35;cursor:not-allowed}
+.pbtn .ic{width:18px;height:18px}
+
+.safety{display:flex;align-items:center;gap:24px;padding:16px 20px;border-top:1px solid #2F3D43;flex-wrap:wrap;background:#1B252A}
+.safe-item{display:flex;align-items:center;gap:12px;min-width:170px}
+.safe-item .ic{color:var(--muted-teal)}
+.safe-item b{display:block;font-size:14px;line-height:18px;font-weight:600}
+.safe-item small{display:block;font-size:12px;line-height:16px;color:#9FB0B6}
+.safe-item.bad .ic{color:#E5636B}.safe-item.warn .ic{color:#E3A94B}
+.tools{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.toggle{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:500;color:#E4ECEE;background:#2A383E;border:1px solid #3B4D55;border-radius:var(--r-control);padding:0 14px;min-height:44px}
+.toggle input{accent-color:var(--muted-teal);width:18px;height:18px}
+.dwell{display:flex;align-items:center;gap:10px;font-size:13px;color:#B7C4C9}
+.dwell input{accent-color:var(--muted-teal);width:110px}
+.spacer{flex:1}
+.stop{display:flex;align-items:center;gap:10px;background:var(--red);color:#fff;border:0;border-radius:var(--r-control);font-weight:700;letter-spacing:.04em;font-size:15px;min-height:56px;padding:0 28px;box-shadow:0 0 0 2px #1B252A,0 0 0 4px var(--red)}
+.stop:hover{background:#8d262c}
+.stop .ic{width:22px;height:22px}
+.rearm{display:none;background:transparent;border:1px solid var(--muted-teal);color:var(--muted-teal);border-radius:var(--r-control);font-weight:600;font-size:14px;min-height:44px;padding:0 16px}
+.rearm.on{display:inline-flex;align-items:center}
+
+.lab-foot{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid #2F3D43}
+.tele{padding:16px 20px;border-right:1px solid #2F3D43;min-width:0}
+.tele:last-child{border-right:0}
+.tele small{display:block;font-size:11px;font-weight:600;letter-spacing:.12em;color:#9FB0B6;text-transform:uppercase}
+.tele b{display:block;font-size:16px;line-height:24px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.log{margin-top:20px;font-size:13px;line-height:20px;color:#9FB0B6;display:flex;gap:16px;flex-wrap:wrap}
+.hint{margin-top:16px;font-size:14px;line-height:20px;color:#B7C4C9;max-width:70ch}
+@media(max-width:980px){.lab-main{grid-template-columns:1fr}.panel{border-left:0;border-top:1px solid #2F3D43}.lab-foot{grid-template-columns:1fr 1fr}.tele:nth-child(2){border-right:0}.tele:nth-child(-n+2){border-bottom:1px solid #2F3D43}.viewport{min-height:360px}}
+
+/* how it works */
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-panel);padding:24px}
+.step .n{font-size:12px;font-weight:600;letter-spacing:.14em;color:var(--teal)}
+.step .ic{color:var(--teal);width:32px;height:32px;margin:16px 0 12px}
+.step h3{font-size:20px;line-height:28px}
+.step p{font-size:14px;line-height:22px;color:var(--muted);margin-top:8px}
+@media(max-width:980px){.steps{grid-template-columns:1fr 1fr}}@media(max-width:560px){.steps{grid-template-columns:1fr}}
+
+/* principles */
+.princ{background:var(--surface);border-block:1px solid var(--border)}
+.pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:48px}
+.pgrid .k{font-size:12px;font-weight:600;letter-spacing:.14em;color:var(--teal)}
+.pgrid h3{font-size:24px;line-height:32px;margin:12px 0 8px}
+.pgrid p{color:var(--muted)}
+@media(max-width:860px){.pgrid{grid-template-columns:1fr;gap:32px}}
+
+/* safety */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:start}
+.rec{list-style:none;counter-reset:r;display:grid;gap:12px}
+.rec li{counter-increment:r;display:grid;grid-template-columns:40px 1fr;gap:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-panel);padding:16px 20px}
+.rec li::before{content:counter(r);width:32px;height:32px;border-radius:50%;background:var(--selected);color:var(--teal);font-weight:600;display:grid;place-items:center;font-size:14px}
+.rec b{display:block;font-weight:600}.rec span{font-size:14px;line-height:20px;color:var(--muted)}
+.facts{display:grid;gap:0;border-top:1px solid var(--border)}
+.facts div{padding:18px 0;border-bottom:1px solid var(--border)}
+.facts b{display:block;font-weight:600}
+.facts span{color:var(--muted);font-size:15px;line-height:22px}
+@media(max-width:860px){.two{grid-template-columns:1fr;gap:32px}}
+
+/* contact */
+.cta-band{background:var(--teal);color:#fff;border-radius:16px;padding:56px;display:grid;grid-template-columns:1.3fr 1fr;gap:32px;align-items:center}
+.cta-band h2{font-size:clamp(30px,4vw,40px);line-height:1.2}
+.cta-band p{color:#CFE3E0;margin-top:12px}
+.cta-band .btn{background:#fff;color:var(--teal);border-color:#fff}
+.cta-band .btn:hover{background:var(--selected)}
+.cta-band .actions{display:flex;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:800px){.cta-band{grid-template-columns:1fr;padding:32px}.cta-band .actions{justify-content:flex-start}}
+footer{padding:40px 0 56px;font-size:13px;line-height:20px;color:var(--muted)}
+footer .wrap{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:flex-start}
+footer p{max-width:60ch}
+
+.reveal{opacity:0;transform:translateY(16px);transition:opacity .6s,transform .6s}
+.reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}.trace{animation:none;stroke-dashoffset:0}html{scroll-behavior:auto}}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="sym" viewBox="145 315 157 138"><path fill="currentColor" d="M 186.148438 343.539062 C 235.949219 315.523438 285.75 318.636719 295.085938 352.875 C 301.3125 384 279.523438 402.675781 248.398438 408.898438 L 298.199219 452.476562 L 254.625 452.476562 L 207.9375 402.675781 C 248.398438 402.675781 270.1875 377.773438 254.625 359.101562 C 242.175781 343.539062 217.273438 340.425781 186.148438 343.539062 Z M 186.148438 343.539062"/><path fill="#65B9AE" d="M 145.6875 452.476562 C 176.8125 405.789062 207.9375 384 254.625 380.886719 C 211.050781 399.5625 192.375 424.460938 179.925781 452.476562 Z M 145.6875 452.476562"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-arm" viewBox="0 0 24 24"><path d="M3 21h8M7 21v-3"/><path d="M7 18 6 12l7-5"/><path d="m13 7 5 2"/><path d="m18 9 2 3M18 9l-1 4"/><circle cx="6" cy="12" r="1.2"/><circle cx="13" cy="7" r="1.2"/></symbol>
+    <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5"/><path d="M5 21v-6a7 7 0 0 1 14 0v6M12 12v9"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14m-6-6 6 6 6-6"/></symbol>
+    <symbol id="i-fwd" viewBox="0 0 24 24"><path d="m6 11 6-6 6 6M6 18l6-6 6 6"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m6 6 6 6 6-6M6 13l6 6 6-6"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><path d="M12 20v-7M12 13 6 6M12 13l6-7"/><circle cx="6" cy="5" r="1"/><circle cx="18" cy="5" r="1"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M12 20v-7M12 13l-3-8M12 13l3-8"/><circle cx="9" cy="4" r="1"/><circle cx="15" cy="4" r="1"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6l-7-3Z"/><path d="m9 12 2.2 2.2L15 10"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/></symbol>
+    <symbol id="i-cam" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-screen" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4m-4 0h8"/></symbol>
+    <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx=".8"/><path d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-sim" viewBox="0 0 24 24"><path d="M12 3 3 8v8l9 5 9-5V8l-9-5Z"/><path d="m3 8 9 5 9-5M12 13v8"/></symbol>
+  </defs>
+</svg>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="logo" href="#top" aria-label="Reacha home">
+      <svg viewBox="0 0 157 138" style="color:var(--teal)" aria-hidden="true"><use href="#sym"/></svg>Reacha
+    </a>
+    <nav aria-label="Main"><ul>
+      <li><a href="#lab">Live lab</a></li>
+      <li><a href="#technology">Technology</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#safety">Safety</a></li>
+      <li><a href="#contact" class="btn">Get in touch</a></li>
+    </ul></nav>
+  </div>
+</header>
+
+<main id="main">
+<!-- HERO -->
+<div class="hero2" id="top">
+  <div class="wrap hero2-in">
+    <h1 class="sr">Reacha — gaze-controlled assistive robotics</h1>
+    <img class="hero2-logo" src="assets/reacha-logo-dark.png" alt="Reacha" width="1200" height="322">
+    <p class="hero2-tag">Assistive robotics for independence</p>
+    <ul class="hero2-feat">
+      <li><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><span>Eye Tracking<br>Control</span></li>
+      <li><svg class="ic" aria-hidden="true"><use href="#i-arm"/></svg><span>Robotic<br>Assistance</span></li>
+      <li><svg class="ic" aria-hidden="true"><use href="#i-person"/></svg><span>Greater<br>Independence</span></li>
+    </ul>
+    <div class="hero2-cta">
+      <a class="btn on-dark" href="#lab"><svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg>Try the live lab</a>
+      <a class="btn ghost-light" href="#technology">Explore the technology</a>
+    </div>
+  </div>
+</div>
+
+<!-- LIVE LAB -->
+<section id="lab">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="eyebrow">Live lab · Simulation</div>
+      <h2>Try the control workspace.</h2>
+      <p>Use your mouse as a stand-in for gaze. Hold the pointer on a direction until it fills, then confirm. No robot is connected: this is a simulated 3D model of the station, with the SO-101 arm from the project repo.</p>
+    </div>
+
+    <div class="lab reveal" id="labapp">
+      <div class="lab-top">
+        <div class="lab-title"><svg class="ic" style="color:var(--muted-teal)" aria-hidden="true"><use href="#i-sim"/></svg>Robot control <small>Select an action with your gaze, then confirm to move.</small></div>
+        <div class="chips" aria-live="polite">
+          <span class="chip sim"><i></i>Simulation · no hardware</span>
+          <span class="chip" id="chipRobot"><i></i>Simulated robot</span>
+          <span class="chip" id="chipGaze"><i></i>Gaze ready</span>
+        </div>
+      </div>
+
+      <div class="lab-main">
+        <div class="viewport" id="vp">
+          <canvas id="cv" aria-label="Simulated robotic arm workspace. Drag to orbit." role="img"></canvas>
+          <span class="vp-label tl" id="camLabel">CAM 01 / Workspace</span>
+          <div class="cams" role="group" aria-label="Camera view">
+            <button type="button" data-cam="work" aria-pressed="true">Workspace</button>
+            <button type="button" data-cam="top" aria-pressed="false">Top</button>
+            <button type="button" data-cam="side" aria-pressed="false">Side</button>
+          </div>
+          <span class="vp-label tr">Simulated 3D model · SO-101</span>
+          <span class="vp-label bl">Task · pick up a cube and place it in the other square</span>
+          <span class="vp-label br">Drag to orbit · Scroll to zoom</span>
+          <div class="loadmsg" id="loadmsg">Loading SO-101 model…</div>
+          <div class="lockbanner" id="lockbanner" role="status"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg><div id="lockText"></div></div>
+        </div>
+
+        <aside class="panel" aria-label="Movement controls">
+          <div>
+            <h3>Movement <span>STEP MODE</span></h3>
+          </div>
+          <div>
+            <div class="plabel"><span>Direction</span><span>Workspace frame</span></div>
+            <div class="dirs" id="dirs">
+              <button class="tgt" data-cmd="left"  type="button"><svg class="ic"><use href="#i-left"/></svg>Left</button>
+              <button class="tgt" data-cmd="fwd"   type="button"><svg class="ic"><use href="#i-fwd"/></svg>Forward</button>
+              <button class="tgt" data-cmd="right" type="button"><svg class="ic"><use href="#i-right"/></svg>Right</button>
+              <button class="tgt" data-cmd="up"    type="button"><svg class="ic"><use href="#i-up"/></svg>Up</button>
+              <button class="tgt" data-cmd="back"  type="button"><svg class="ic"><use href="#i-back"/></svg>Back</button>
+              <button class="tgt" data-cmd="down"  type="button"><svg class="ic"><use href="#i-down"/></svg>Down</button>
+            </div>
+          </div>
+          <div>
+            <div class="plabel"><span>Gripper</span></div>
+            <div class="grip" id="grip">
+              <button class="tgt" data-cmd="open"  type="button"><svg class="ic"><use href="#i-open"/></svg>Open</button>
+              <button class="tgt" data-cmd="close" type="button"><svg class="ic"><use href="#i-close"/></svg>Close</button>
+            </div>
+          </div>
+          <div class="pending">
+            <div class="cmd" id="pendTitle"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><span>No command selected</span></div>
+            <div class="sub" id="pendSub">Hold your gaze to select a command.</div>
+            <div class="row2">
+              <button class="pbtn" id="btnCancel" type="button" disabled><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>Cancel</button>
+              <button class="pbtn go" id="btnGo" type="button" disabled><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>Confirm</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <div class="lab-foot" aria-label="Telemetry (simulated)">
+        <div class="tele"><small>Arm</small><b id="tArm">Stationary</b></div>
+        <div class="tele"><small>Tip x / y / z (mm)</small><b id="tPos">0 / 24 / 16</b></div>
+        <div class="tele"><small>Gripper</small><b id="tGrip">Open</b></div>
+        <div class="tele"><small>Steps confirmed</small><b id="tSteps">0</b></div>
+      </div>
+
+      <div class="safety">
+        <div class="safe-item" id="sGaze"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><div><b>Gaze tracking</b><small id="sGazeT">Tracking ready</small></div></div>
+        <div class="safe-item" id="sArm"><svg class="ic" aria-hidden="true"><use href="#i-shield"/></svg><div><b id="sArmB">Arm stationary</b><small>Controller status (simulated)</small></div></div>
+        <div class="spacer"></div>
+        <div class="tools">
+          <label class="toggle"><input type="checkbox" id="lossToggle"> Simulate tracking loss</label>
+          <label class="dwell">Dwell <input type="range" id="dwellRange" min="500" max="2000" step="100" value="1000" aria-label="Dwell duration"> <span id="dwellVal">1.0 s</span></label>
+          <button class="rearm" id="btnRearm" type="button">Re-arm</button>
+          <button class="stop" id="btnStop" type="button"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>STOP MOTION</button>
+        </div>
+      </div>
+    </div>
+    <p class="hint">Keyboard: Tab to a target and press Enter to select it instantly. Stop motion needs no confirmation and is always available. After a stop or tracking loss, nothing moves again until you re-arm deliberately.</p>
+    <div class="log" id="log" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section id="technology">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="eyebrow">Technology</div>
+      <h2>Precision, without complexity.</h2>
+      <p>Reacha translates intentional gaze into robotic arm commands. The interface keeps the camera feed in front, and keeps you in charge of each step.</p>
+    </div>
+    <div class="steps">
+      <div class="step reveal"><div class="n">01 / CALIBRATE</div><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg><h3>Set up your gaze</h3><p>Calibration is its own task. Align the front camera while seated in your normal position. Movement stays disabled until it is done.</p></div>
+      <div class="step reveal"><div class="n">02 / SELECT</div><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><h3>Look to select</h3><p>Hold your gaze on a large target. A progress bar previews the dwell without moving the robot. Dwell time is adjustable.</p></div>
+      <div class="step reveal"><div class="n">03 / CONFIRM</div><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg><h3>Review, then confirm</h3><p>Selection and execution are separate. The command is shown in plain words, and stale commands expire.</p></div>
+      <div class="step reveal"><div class="n">04 / MOVE</div><svg class="ic" aria-hidden="true"><use href="#i-arm"/></svg><h3>One bounded step</h3><p>The arm moves a small, fixed step in the workspace frame, with the live camera view always visible.</p></div>
+    </div>
+  </div>
+</section>
+
+<div class="princ"><section style="padding:80px 0">
+  <div class="wrap">
+    <div class="pgrid">
+      <div class="reveal"><div class="k">01 / AGENCY</div><h3>The user leads. The robot responds.</h3><p>Choices and control remain with the person using the system.</p></div>
+      <div class="reveal"><div class="k">02 / CONFIDENCE</div><h3>Every state is clear.</h3><p>Actions and system status are explicit, predictable and reversible where possible.</p></div>
+      <div class="reveal"><div class="k">03 / PRECISION</div><h3>Detail that serves the task.</h3><p>No decoration for its own sake. Large targets, plain labels, and icons paired with words.</p></div>
+    </div>
+  </div>
+</section></div>
+
+<!-- SAFETY -->
+<section id="safety">
+  <div class="wrap two">
+    <div class="reveal">
+      <div class="eyebrow">Safety and privacy</div>
+      <h2 style="font-size:clamp(32px,4.2vw,40px);line-height:1.2;margin:12px 0 16px">Designed for interruption.</h2>
+      <p style="color:var(--muted);font-size:18px;line-height:28px;margin-bottom:28px">If tracking or the connection fails, it is shown immediately. Movement never resumes on its own.</p>
+      <div class="facts">
+        <div><b>Stop is always available</b><span>No confirmation, with an independent safety path outside the screen. A controller watchdog is required, since the interface alone cannot stop the arm.</span></div>
+        <div><b>Two cameras, two jobs</b><span>One feed shows the workspace. A front camera estimates gaze, and its use is clearly indicated.</span></div>
+        <div><b>Privacy by default</b><span>Face footage retention is kept to a minimum.</span></div>
+      </div>
+    </div>
+    <ol class="rec reveal" aria-label="Recovery sequence">
+      <li><div><b>Inhibit commands</b><span>Invalidate any pending selection and reject new motion requests.</span></div></li>
+      <li><div><b>Verify robot state</b><span>Show a stop acknowledgement only when the controller has sent one.</span></div></li>
+      <li><div><b>Restore tracking</b><span>Check video, gaze and connection. Recalibrate if needed.</span></div></li>
+      <li><div><b>Re-arm explicitly</b><span>Return to the stationary state and require a new, deliberate action.</span></div></li>
+    </ol>
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section id="architecture">
+  <div class="wrap arch-wrap">
+    <div class="sec-head reveal">
+      <div class="eyebrow">Architecture · Draft concept</div>
+      <h2>From gaze to motion, with safety in the loop.</h2>
+      <p>Your selection is mapped to a command, checked by the command gateway under a safety supervisor, and only then executed by the robot controller. Video and robot state flow back to the interface.</p>
+    </div>
+    <div class="arch-panel reveal">
+      <svg class="arch-svg" viewBox="44 176 1832 704" role="img" aria-labelledby="arch-t arch-d" xmlns="http://www.w3.org/2000/svg">
+<title id="arch-t">Reacha concept architecture</title>
+<desc id="arch-d">Four layers: human interface, perception and intent, command and safety, and robot station. Gaze is captured by the user-facing camera, estimated and mapped to commands, validated by the command gateway under a safety supervisor, and executed by the robot controller. Workspace video and robot telemetry flow back to the application.</desc>
+<defs><marker id="m-ctl" markerWidth="10" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto" refX="9" refY="4.5"><path d="M0,0 L9,4.5 L0,9 Z" class="mk-ctl"/></marker><marker id="m-vid" markerWidth="10" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto" refX="9" refY="4.5"><path d="M0,0 L9,4.5 L0,9 Z" class="mk-vid"/></marker><marker id="m-sft" markerWidth="10" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto" refX="9" refY="4.5"><path d="M0,0 L9,4.5 L0,9 Z" class="mk-sft"/></marker><marker id="m-gaze" markerWidth="10" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto" refX="9" refY="4.5"><path d="M0,0 L9,4.5 L0,9 Z" class="mk-gaze"/></marker></defs>
+<rect class="a-col" x="64" y="192" width="408" height="661" rx="12"/><text class="a-num" x="86" y="226">01</text><text class="a-head" x="126" y="226">HUMAN INTERFACE</text><line class="a-rule" x1="84" y1="243" x2="452" y2="243"/>
+<rect class="a-col" x="496" y="192" width="424" height="661" rx="12"/><text class="a-num" x="518" y="226">02</text><text class="a-head" x="558" y="226">PERCEPTION &amp; INTENT</text><line class="a-rule" x1="516" y1="243" x2="900" y2="243"/>
+<rect class="a-col" x="944" y="192" width="432" height="661" rx="12"/><text class="a-num" x="966" y="226">03</text><text class="a-head" x="1006" y="226">COMMAND &amp; SAFETY</text><line class="a-rule" x1="964" y1="243" x2="1356" y2="243"/>
+<rect class="a-col" x="1400" y="192" width="456" height="661" rx="12"/><text class="a-num" x="1422" y="226">04</text><text class="a-head" x="1462" y="226">ROBOT STATION</text><line class="a-rule" x1="1420" y1="243" x2="1836" y2="243"/>
+<polyline class="a-line gaze" points="268,367 268,413" marker-end="url(#m-gaze)"/>
+<text class="a-lab" x="284" y="396">gaze</text>
+<polyline class="a-line ctl" points="452,463 516,463" marker-end="url(#m-ctl)"/>
+<polyline class="a-line ctl" points="708,513 708,615" marker-end="url(#m-ctl)"/>
+<text class="a-lab ctl" x="724" y="570">gaze coordinates</text>
+<polyline class="a-line ctl" points="516,661 452,661" marker-end="url(#m-ctl)"/>
+<polyline class="a-line ctl" points="452,722 516,722" marker-end="url(#m-ctl)"/>
+<polyline class="a-line ctl" points="900,687 964,687" marker-end="url(#m-ctl)"/>
+<polyline class="a-line ctl" points="1356,687 1420,687" marker-end="url(#m-ctl)"/>
+<polyline class="a-line ctl" points="1628,615 1628,513" marker-end="url(#m-ctl)"/>
+<text class="a-lab ctl" x="1644" y="568">motion</text>
+<polyline class="a-line sft" points="1160,367 1160,615" marker-end="url(#m-sft)"/>
+<text class="a-lab sft" x="1176" y="466">permit / inhibit</text>
+<polyline class="a-line vid" points="1628,760 1628,806 268,806 268,760" marker-end="url(#m-vid)"/>
+<polyline class="a-line vid" points="1420,317 1382,317 1382,254 76,254 76,687 84,687" marker-end="url(#m-vid)"/>
+<rect class="a-tagbg" x="538.0" y="241" width="300" height="26" rx="4"/><text class="a-tag" x="688" y="259" text-anchor="middle">WORKSPACE VIDEO STREAM</text>
+<rect class="a-tagbg" x="770.0" y="793" width="380" height="26" rx="4"/><text class="a-tag" x="960" y="811" text-anchor="middle">ROBOT STATE / TELEMETRY FEEDBACK</text>
+<g class="a-node"><rect class="a-card" x="84" y="267" width="368" height="100" rx="9"/><use class="a-ic" href="#i-person" x="100" y="280" width="32" height="32"/><text class="a-title" x="146" y="301">User</text><text class="a-sub" x="146" y="329">Eye movement / visual intent</text></g>
+<g class="a-node"><rect class="a-card" x="84" y="413" width="368" height="100" rx="9"/><use class="a-ic" href="#i-cam" x="100" y="426" width="32" height="32"/><text class="a-title" x="146" y="447">User-facing camera</text><text class="a-sub" x="146" y="475">RGB video capture</text></g>
+<g class="a-node"><rect class="a-card" x="84" y="615" width="368" height="145" rx="9"/><use class="a-ic" href="#i-screen" x="100" y="628" width="32" height="32"/><text class="a-title" x="146" y="649">Web / mobile application</text><text class="a-sub" x="146" y="677">Live workspace video</text><text class="a-sub" x="146" y="699">Gaze selection &amp; confirmation</text><text class="a-sub" x="146" y="721">Stop / status feedback</text></g>
+<g class="a-node"><rect class="a-card" x="516" y="413" width="384" height="100" rx="9"/><use class="a-ic" href="#i-eye" x="532" y="426" width="32" height="32"/><text class="a-title" x="578" y="447">Gaze estimation</text><text class="a-sub" x="578" y="475">Computer vision / eye landmarks</text></g>
+<g class="a-node"><rect class="a-card" x="516" y="615" width="384" height="145" rx="9"/><use class="a-ic" href="#i-chip" x="532" y="628" width="32" height="32"/><text class="a-title" x="578" y="649">Interaction logic</text><text class="a-sub" x="578" y="677">Calibration &amp; confidence</text><text class="a-sub" x="578" y="699">Dwell / selection state</text><text class="a-sub" x="578" y="721">Intent-to-command mapping</text></g>
+<g class="a-node"><rect class="a-card" x="964" y="267" width="392" height="100" rx="9"/><use class="a-ic" href="#i-shield" x="980" y="280" width="32" height="32"/><text class="a-title" x="1026" y="301">Safety supervisor</text><text class="a-sub" x="1026" y="329">Local limits &amp; motion inhibit</text></g>
+<g class="a-node"><rect class="a-card emph" x="964" y="615" width="392" height="145" rx="9"/><use class="a-ic" href="#i-shield" x="980" y="628" width="32" height="32"/><text class="a-title" x="1026" y="649">Command gateway</text><text class="a-sub" x="1026" y="677">Validate requested motion</text><text class="a-sub" x="1026" y="699">Connection &amp; watchdog checks</text><text class="a-sub" x="1026" y="721">Command / stop messages</text></g>
+<g class="a-node"><rect class="a-card" x="1420" y="267" width="416" height="100" rx="9"/><use class="a-ic" href="#i-cam" x="1436" y="280" width="32" height="32"/><text class="a-title" x="1482" y="301">Workspace camera</text><text class="a-sub" x="1482" y="329">Robot-side video capture</text></g>
+<g class="a-node"><rect class="a-card" x="1420" y="413" width="416" height="100" rx="9"/><use class="a-ic" href="#i-arm" x="1436" y="426" width="32" height="32"/><text class="a-title" x="1482" y="447">Robotic arm + gripper</text><text class="a-sub" x="1482" y="475">Physical interaction with objects</text></g>
+<g class="a-node"><rect class="a-card" x="1420" y="615" width="416" height="145" rx="9"/><use class="a-ic" href="#i-chip" x="1436" y="628" width="32" height="32"/><text class="a-title" x="1482" y="649">Robot controller</text><text class="a-sub" x="1482" y="677">Execute bounded commands</text><text class="a-sub" x="1482" y="699">Joint / gripper actuation</text><text class="a-sub" x="1482" y="721">Report controller state</text></g>
+</svg>
+      <div class="arch-list">
+<div class="al-layer"><div class="al-head"><span>01</span>HUMAN INTERFACE</div>
+<div class="al-item"><svg class="ic" aria-hidden="true"><use href="#i-person"/></svg><div><b>User</b><span>Eye movement / visual intent</span></div></div>
+<div class="al-item"><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg><div><b>User-facing camera</b><span>RGB video capture</span></div></div>
+<div class="al-item"><svg class="ic" aria-hidden="true"><use href="#i-screen"/></svg><div><b>Web / mobile application</b><span>Live workspace video · Gaze selection &amp; confirmation · Stop / status feedback</span></div></div>
+</div>
+<div class="al-link">↓ Gaze</div>
+<div class="al-layer"><div class="al-head"><span>02</span>PERCEPTION &amp; INTENT</div>
+<div class="al-item"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><div><b>Gaze estimation</b><span>Computer vision / eye landmarks</span></div></div>
+<div class="al-item"><svg class="ic" aria-hidden="true"><use href="#i-chip"/></svg><div><b>Interaction logic</b><span>Calibration &amp; confidence · Dwell / selection state · Intent-to-command mapping</span></div></div>
+</div>
+<div class="al-link">↓ Control / intent: gaze coordinates, then commands</div>
+<div class="al-layer"><div class="al-head"><span>03</span>COMMAND &amp; SAFETY</div>
+<div class="al-item"><svg class="ic" aria-hidden="true"><use href="#i-shield"/></svg><div><b>Safety supervisor</b><span>Local limits &amp; motion inhibit</span></div></div>
+<div class="al-item"><svg class="ic" aria-hidden="true"><use href="#i-shield"/></svg><div><b>Command gateway</b><span>Validate requested motion · Connection &amp; watchdog checks · Command / stop messages</span></div></div>
+</div>
+<div class="al-link">↓ Control / intent, with permit / inhibit from the safety supervisor</div>
+<div class="al-layer"><div class="al-head"><span>04</span>ROBOT STATION</div>
+<div class="al-item"><svg class="ic" aria-hidden="true"><use href="#i-chip"/></svg><div><b>Robot controller</b><span>Execute bounded commands · Joint / gripper actuation · Report controller state</span></div></div>
+<div class="al-item"><svg class="ic" aria-hidden="true"><use href="#i-arm"/></svg><div><b>Robotic arm + gripper</b><span>Physical interaction with objects</span></div></div>
+<div class="al-item"><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg><div><b>Workspace camera</b><span>Robot-side video capture</span></div></div>
+</div>
+<div class="al-link vid">↑ Workspace video stream and robot state / telemetry feedback return to the web / mobile application</div></div>
+      <div class="arch-foot">
+        <div class="arch-legend" aria-label="Signal legend">
+          <b>SIGNAL LEGEND</b>
+          <span><svg width="56" height="12" aria-hidden="true"><line x1="2" y1="6" x2="46" y2="6" class="a-line ctl"/><path d="M44,1.5 L53,6 L44,10.5Z" class="mk-ctl"/></svg>Control / intent</span>
+          <span><svg width="56" height="12" aria-hidden="true"><line x1="2" y1="6" x2="46" y2="6" class="a-line vid"/><path d="M44,1.5 L53,6 L44,10.5Z" class="mk-vid"/></svg>Video / telemetry</span>
+          <span><svg width="56" height="12" aria-hidden="true"><line x1="2" y1="6" x2="46" y2="6" class="a-line sft"/><path d="M44,1.5 L53,6 L44,10.5Z" class="mk-sft"/></svg>Safety / enable</span>
+        </div>
+        <div class="arch-note"><b>DESIGN BOUNDARY</b><p>Proposed logical architecture. Robot-side stopping and motion limits require independent engineering validation.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CONTACT -->
+<section id="contact" style="padding-top:0">
+  <div class="wrap">
+    <div class="cta-band reveal">
+      <div><h2>Interested in Reacha?</h2><p>We are developing Reacha with users and robotics engineers. Tell us what everyday tasks matter to you.</p></div>
+      <div class="actions">
+        <a class="btn" href="https://github.com/jakub-staudt/lauzhack_roboticarm" rel="noopener">Project on GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer><div class="wrap">
+  <a class="logo" href="#top" style="font-size:20px"><svg viewBox="0 0 157 138" style="color:var(--teal);height:24px" aria-hidden="true"><use href="#sym"/></svg>Reacha</a>
+  <p>Prototype. Design specifications are proposals, not safety certification or verified clinical claims. The hero image is an illustration. The live lab runs a simulated arm and is not connected to hardware.</p>
+</div></footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(()=>{
+/* ---------- reveal ---------- */
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+const $=id=>document.getElementById(id);
+if(!window.THREE){$('lockText').innerHTML='<b>3D engine could not load.</b> Check your connection and reload.';$('lockbanner').classList.add('on');return}
+const T=THREE;
+// SO-101 kinematics from so101.xml (MuJoCo), units: metres / radians. THREE must be in scope.
+const SO101=(function(){
+  const Q=(w,x,y,z)=>{const q=new T.Quaternion(x,y,z,w);return q.normalize()};
+  const M=(p,q)=>new T.Matrix4().compose(new T.Vector3(...p),Q(...q),new T.Vector3(1,1,1));
+  // chain of bodies: frame relative to parent, joint index (rotation about local z), visual geoms
+  const BODIES=[
+   {n:'base',p:[0,0,0],q:[1,0,0,0],j:-1,par:-1,g:[
+     ['base_motor_holder_so101_v1',[-0.006365,-9.9e-05,-0.0024],[1,1,1,1],'y'],
+     ['base_so101_v2',[-0.006365,0,-0.0024],[1,1,1,1],'y'],
+     ['sts3215_03a_v1',[0.0263353,0,0.0437],[1,0,0,0],'k'],
+     ['waveshare_mounting_plate_so101_v2',[-0.0309827,-0.000199,0.0474],[1,1,1,1],'y']]},
+   {n:'shoulder',p:[0.0388353,0,0.0624],q:[0,0,-1,0],j:0,par:0,g:[
+     ['sts3215_03a_v1',[-0.030399,0.000422,-0.0417],[1,1,1,-1],'k'],
+     ['motor_holder_so101_base_v1',[-0.067599,-0.0001778,0.01585],[1,1,-1,1],'y'],
+     ['rotation_pitch_so101_v1',[0.012201,2.2e-05,0.0464],[1,-1,0,0],'y']]},
+   {n:'upper_arm',p:[-0.0303992,-0.0182778,-0.0542],q:[1,-1,-1,-1],j:1,par:1,g:[
+     ['sts3215_03a_v1',[-0.11257,-0.0155,0.0187],[0,-1,1,0],'k'],
+     ['upper_arm_so101_v1',[-0.065085,0.012,0.0182],[0,1,0,0],'y']]},
+   {n:'lower_arm',p:[-0.11257,-0.028,0],q:[1,0,0,1],j:2,par:2,g:[
+     ['under_arm_so101_v1',[-0.06485,-0.032,0.0182],[0,1,0,0],'y'],
+     ['motor_holder_so101_wrist_v1',[-0.06485,-0.032,0.018],[0,-1,0,0],'y'],
+     ['sts3215_03a_v1',[-0.1224,0.0052,0.0187],[0,0,1,0],'k']]},
+   {n:'wrist',p:[-0.1349,0.0052,0],q:[1,0,0,-1],j:3,par:3,g:[
+     ['sts3215_03a_no_horn_v1',[0,-0.0424,0.0306],[1,1,1,-1],'k'],
+     ['wrist_roll_pitch_so101_v2',[0,-0.028,0.0181],[1,-1,-1,-1],'y']]},
+   {n:'gripper',p:[5.55112e-17,-0.0611,0.0181],q:[0.0172091,-0.0172091,0.706897,0.706897],j:4,par:4,g:[
+     ['sts3215_03a_v1',[0.0077,0.0001,-0.0234],[1,-1,0,0],'k'],
+     ['wrist_roll_follower_so101_v1',[0,-0.000218,0.00095],[0,1,0,0],'y'],
+     ['wrist_roll_follower_so101_camera_mount',[0,-0.000218,0.00095],[0,1,0,0],'y']]},
+   {n:'jaw',p:[0.0202,0.0188,-0.0234],q:[1,1,0,0],j:5,par:5,g:[
+     ['moving_jaw_so101_v1',[0,0,0.0189],[1,0,0,0],'y']]}
+  ];
+  const LIM=[[-1.91986,1.91986],[-1.7453293,1.7453293],[-1.69,1.69],[-1.658063,1.658063],[-2.7438473,2.7438473],[-0.174533,1.7453292]];
+  BODIES.forEach(b=>{b.M=M(b.p,b.q);b.G=b.g.map(g=>({mesh:g[0],M:M(g[1],g[2]),col:g[3]}))});
+  const SITE=M([0.012,-0.000218,-0.098127],[0.707107,0,0.707107,0]);
+  const rz=new T.Matrix4();
+  // returns world matrices (base frame) per body, and the gripper-frame matrix
+  function fk(q,out){
+    out=out||BODIES.map(()=>new T.Matrix4());
+    for(let i=0;i<BODIES.length;i++){
+      const b=BODIES[i];const m=out[i];
+      if(b.par<0&&i===0){m.copy(b.M)}else{m.copy(out[i-1]).multiply(b.M)}
+      if(b.j>=0){rz.makeRotationZ(q[b.j]);m.multiply(rz)}
+    }
+    return out;
+  }
+  // jaw is a child of the gripper body, not of the wrist body chain order: fix by explicit parent
+  function fk2(q,out){
+    out=out||BODIES.map(()=>new T.Matrix4());
+    const par=[-1,0,1,2,3,4,5];
+    for(let i=0;i<BODIES.length;i++){
+      const b=BODIES[i];const m=out[i];
+      if(par[i]<0)m.copy(b.M);else m.copy(out[par[i]]).multiply(b.M);
+      if(b.j>=0){rz.makeRotationZ(q[b.j]);m.multiply(rz)}
+    }
+    return out;
+  }
+  const _o=BODIES.map(()=>new T.Matrix4()),_s=new T.Matrix4();
+  function tip(q){fk2(q,_o);_s.copy(_o[5]).multiply(SITE);return _s}
+  const _p=new T.Vector3(),_a=new T.Vector3();
+  function resid(q,target,wo,r){
+    const m=tip(q);_p.setFromMatrixPosition(m);
+    r[0]=target.x-_p.x;r[1]=target.y-_p.y;r[2]=target.z-_p.z;
+    // tool x axis (approach) should point straight down (-z): residual is (a_z + 1)
+    _a.set(m.elements[0],m.elements[1],m.elements[2]);
+    r[3]=-wo*(_a.z+1);   // want a.z -> -1
+  }
+  function solve4(A,b){ // gauss for 4x4
+    const n=4,M=A.map((r,i)=>[...r,b[i]]);
+    for(let i=0;i<n;i++){let p=i;for(let k=i+1;k<n;k++)if(Math.abs(M[k][i])>Math.abs(M[p][i]))p=k;[M[i],M[p]]=[M[p],M[i]];
+      const d=M[i][i]||1e-12;for(let k=i+1;k<n;k++){const f=M[k][i]/d;for(let c=i;c<=n;c++)M[k][c]-=f*M[i][c]}}
+    const x=new Array(n).fill(0);for(let i=n-1;i>=0;i--){let s=M[i][n];for(let c=i+1;c<n;c++)s-=M[i][c]*x[c];x[i]=s/(M[i][i]||1e-12)}return x}
+  // damped least squares on joints 0..3, wrist_roll and gripper unchanged
+  function ik(target,q0,opts){
+    opts=opts||{};const wo=opts.wo??0.05,iters=opts.iters??80,lam=opts.lam??1e-4;
+    const q=q0.slice(),r=[0,0,0,0],r2=[0,0,0,0];const J=[[],[],[],[]];
+    let err=1;
+    for(let it=0;it<iters;it++){
+      resid(q,target,wo,r);
+      err=Math.hypot(r[0],r[1],r[2]);
+      if(err<4e-5&&Math.abs(r[3])<2e-3)break;
+      const h=1e-5;
+      for(let j=0;j<4;j++){const s=q[j];q[j]=s+h;resid(q,target,wo,r2);q[j]=s;for(let k=0;k<4;k++)J[k][j]=-(r2[k]-r[k])/h}
+      const A=[[],[],[],[]],b=[];
+      for(let i=0;i<4;i++){for(let j=0;j<4;j++){let s=0;for(let k=0;k<4;k++)s+=J[k][i]*J[k][j];A[i][j]=s+(i===j?lam:0)}let s=0;for(let k=0;k<4;k++)s+=J[k][i]*r[k];b[i]=s}
+      const dq=solve4(A,b);
+      let mx=0;dq.forEach(v=>mx=Math.max(mx,Math.abs(v)));const sc=mx>0.25?0.25/mx:1;
+      for(let j=0;j<4;j++)q[j]=Math.min(LIM[j][1]-.02,Math.max(LIM[j][0]+.02,q[j]+dq[j]*sc));
+    }
+    resid(q,target,wo,r);
+    return {q,err:Math.hypot(r[0],r[1],r[2]),tilt:r[3]/-wo};
+  }
+  return {BODIES,LIM,fk:fk2,tip,ik,SITE};
+})();
+
+
+/* ---------- lab state (SO-101 in the gaze station; metres, base frame: x forward, y left, z above the table) ---------- */
+const BASE_W=new T.Vector3(-0.35,0,0.75);            // robot base in station frame (scene.xml)
+const BOUNDS={x:[0.17,0.32],y:[-0.2,0.2],z:[0.012,0.062]};
+const STEP=0.025;
+const G_OPEN=0.5,G_CLOSED=-0.09,G_HOLD=0.05;         // jaw angles (rad): open 55 mm, closed, 20 mm cube
+const HOME_Q=[0,-23.3*Math.PI/180,46.4*Math.PI/180,3.3*Math.PI/180,0,0.272];
+const S={tracking:true,armed:true,pending:null,pendAt:0,tgt:{x:.22,y:0,z:.062},
+  q:HOME_Q.slice(),qFrom:null,qGoal:null,t:1,dur:1,gT:G_OPEN,held:-1,steps:0,dwell:1000};
+{const r=SO101.ik(new T.Vector3(S.tgt.x,S.tgt.y,S.tgt.z),HOME_Q,{iters:200,wo:.03});S.q=r.q.slice();S.q[5]=G_OPEN;S.qGoal=S.q.slice();S.qFrom=S.q.slice()}
+const CUBES=[
+ {name:'red',  col:0xC70811,p:new T.Vector3(-0.11,0.05,0.76)},
+ {name:'blue', col:0x0A40C7,p:new T.Vector3(-0.11,0.15,0.76)},
+ {name:'yellow',col:0xE09C09,p:new T.Vector3(-0.08,0.10,0.76)}];
+CUBES.forEach(c=>{c.vz=0});
+const CMD={
+  left:{d:[0,1,0],t:'Move left'},right:{d:[0,-1,0],t:'Move right'},
+  fwd:{d:[1,0,0],t:'Move forward'},back:{d:[-1,0,0],t:'Move back'},
+  up:{d:[0,0,1],t:'Move up'},down:{d:[0,0,-1],t:'Move down'},
+  open:{g:1,t:'Open grip'},close:{g:0,t:'Close grip'}};
+const ICON={left:'i-left',right:'i-right',fwd:'i-fwd',back:'i-back',up:'i-up',down:'i-down',open:'i-open',close:'i-close'};
+const tgts=[...document.querySelectorAll('.tgt')];
+const logEl=$('log');let logs=[];
+function log(m){const t=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});logs.unshift(t+' · '+m);logs=logs.slice(0,4);logEl.innerHTML=logs.map(l=>'<span>'+l+'</span>').join('')}
+const canSelect=()=>S.tracking&&S.armed;
+const moving=()=>S.t<1||Math.abs(S.q[5]-S.gT)>.012;
+
+function setPending(c){S.pending=c;S.pendAt=performance.now();tgts.forEach(b=>b.classList.toggle('sel',b.dataset.cmd===c));renderPending()}
+function renderPending(){
+  const c=S.pending;
+  $('btnCancel').disabled=!c; $('btnGo').disabled=!c||!canSelect()||moving();
+  const t=$('pendTitle');
+  if(!c){t.innerHTML='<svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><span>No command selected</span>';
+    $('pendSub').textContent=canSelect()?'Hold your gaze to select a command.':'Movement is locked.';return}
+  t.innerHTML='<svg class="ic" aria-hidden="true"><use href="#'+ICON[c]+'"/></svg><span>'+CMD[c].t+'</span>';
+  $('pendSub').textContent=CMD[c].g!==undefined?'Gripper command · Awaiting confirmation':'One bounded step · Awaiting confirmation';
+}
+function clearPending(){S.pending=null;tgts.forEach(b=>b.classList.remove('sel'));renderPending()}
+$('btnCancel').onclick=()=>{clearPending();log('Selection cancelled')};
+$('btnGo').onclick=confirm_;
+const clampB=g=>({x:Math.min(BOUNDS.x[1],Math.max(BOUNDS.x[0],g.x)),y:Math.min(BOUNDS.y[1],Math.max(BOUNDS.y[0],g.y)),z:Math.min(BOUNDS.z[1],Math.max(BOUNDS.z[0],g.z))});
+const _tm=new T.Matrix4(),_mats=SO101.BODIES.map(()=>new T.Matrix4());
+function tipState(){SO101.fk(S.q,_mats);_tm.copy(_mats[5]).multiply(SO101.SITE);const e=_tm.elements;
+  return {p:new T.Vector3(e[12],e[13],e[14]),z:new T.Vector3(e[8],e[9],e[10])}}
+function confirm_(){
+  const c=S.pending; if(!c||!canSelect()||moving())return;
+  const m=CMD[c];
+  if(m.d){
+    const n=clampB({x:+(S.tgt.x+m.d[0]*STEP).toFixed(4),y:+(S.tgt.y+m.d[1]*STEP).toFixed(4),z:+(S.tgt.z+m.d[2]*STEP).toFixed(4)});
+    if(Math.abs(n.x-S.tgt.x)+Math.abs(n.y-S.tgt.y)+Math.abs(n.z-S.tgt.z)<1e-6){log('At workspace limit · no movement')}
+    else{
+      const r=SO101.ik(new T.Vector3(n.x,n.y,n.z),S.q,{iters:150,wo:.03});
+      if(r.err>.0035){log('Outside reachable workspace · no movement')}
+      else{S.qFrom=S.q.slice();S.qGoal=S.q.slice();for(let j=0;j<4;j++)S.qGoal[j]=r.q[j];
+        const dist=Math.hypot(n.x-S.tgt.x,n.y-S.tgt.y,n.z-S.tgt.z);S.dur=.55+dist*7;S.t=0;S.tgt=n;S.steps++;log(m.t+' confirmed')}
+    }
+  }else if(m.g===1){S.gT=G_OPEN;if(S.held>=0){log(CUBES[S.held].name+' cube released');S.held=-1}else log('Open grip confirmed');S.steps++}
+  else{
+    const ts=tipState();const mid=ts.p.clone().addScaledVector(ts.z,-.010);mid.z-=.002;
+    let best=-1,bd=.03;CUBES.forEach((cu,i)=>{if(i===S.held)return;const w=cu.p.clone().sub(BASE_W);const d=w.distanceTo(mid);if(d<bd){bd=d;best=i}});
+    if(best>=0&&S.q[5]>G_HOLD+.05){S.gT=G_HOLD;S.held=best;log('Close grip · holding '+CUBES[best].name+' cube')}
+    else{S.gT=G_CLOSED;log('Close grip confirmed')}
+    S.steps++;
+  }
+  clearPending();
+}
+/* dwell */
+let hov=null,hovStart=0;
+tgts.forEach(b=>{
+  b.addEventListener('pointerenter',()=>{if(!canSelect())return;hov=b;hovStart=performance.now();b.classList.add('dwell')});
+  b.addEventListener('pointerleave',()=>{if(hov===b){hov=null}b.classList.remove('dwell');b.style.setProperty('--p',0)});
+  b.addEventListener('click',()=>{if(!canSelect())return;setPending(b.dataset.cmd);log('Selected: '+CMD[b.dataset.cmd].t)});
+});
+$('dwellRange').oninput=e=>{S.dwell=+e.target.value;$('dwellVal').textContent=(S.dwell/1000).toFixed(1)+' s'};
+
+/* stop / loss / rearm */
+function lock(reason,banner){
+  S.armed=false;clearPending();S.t=1;S.qGoal=S.q.slice();S.gT=S.q[5];
+  const ts=tipState();S.tgt={x:ts.p.x,y:ts.p.y,z:ts.p.z};
+  $('btnRearm').classList.add('on'); render();
+  $('lockText').innerHTML=banner; $('lockbanner').classList.add('on');
+  log(reason);
+}
+$('btnStop').onclick=()=>lock('Stop motion · simulated controller acknowledged','<b>Motion stopped.</b> Commands are inhibited. Re-arm to continue.');
+$('lossToggle').onchange=e=>{
+  if(e.target.checked){S.tracking=false;lock('Tracking lost · commands inhibited','<b>Tracking interrupted.</b> Commands have been inhibited. Restore tracking, then re-arm.')}
+  else{S.tracking=true;log('Tracking restored · re-arm required');render()}
+};
+$('btnRearm').onclick=()=>{
+  if(!S.tracking){log('Cannot re-arm · tracking not ready');return}
+  S.armed=true;$('btnRearm').classList.remove('on');$('lockbanner').classList.remove('on');log('Re-armed · stationary');render();
+};
+function render(){
+  const ok=canSelect();
+  tgts.forEach(b=>b.setAttribute('aria-disabled',ok?'false':'true'));
+  const cg=$('chipGaze');cg.innerHTML='<i></i>'+(S.tracking?'Gaze ready':'Gaze not ready');cg.className='chip'+(S.tracking?'':' bad');
+  const cr=$('chipRobot');cr.innerHTML='<i></i>'+(S.armed?'Simulated robot':'Motion inhibited');cr.className='chip'+(S.armed?'':' warn');
+  $('sGaze').className='safe-item'+(S.tracking?'':' bad');$('sGazeT').textContent=S.tracking?'Tracking ready':'Tracking lost';
+  $('sArm').className='safe-item'+(S.armed?'':' warn');
+  renderPending();
+}
+setInterval(()=>{if(S.pending&&performance.now()-S.pendAt>10000){clearPending();log('Pending command expired')}},500);
+
+/* ---------- 3D scene ---------- */
+const cv=$('cv');
+const renderer=new T.WebGLRenderer({canvas:cv,antialias:true});
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;
+renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
+const scene=new T.Scene();const BG=new T.Color(0x182126),BGR=new T.Color(0x2a1a1f);scene.background=BG.clone();
+const camera=new T.PerspectiveCamera(40,1,.02,20);
+function resize(){const r=cv.getBoundingClientRect();if(!r.width)return;renderer.setSize(r.width,r.height,false);camera.aspect=r.width/Math.max(1,r.height);camera.updateProjectionMatrix()}
+new ResizeObserver(resize).observe(cv);resize();
+const world=new T.Group();world.rotation.x=-Math.PI/2;scene.add(world);   // station frame (z up)
+world.add(new T.HemisphereLight(0xe6f1f1,0x1a2428,.85));
+const sun=new T.DirectionalLight(0xffffff,.95);sun.position.set(.5,-.7,2.2);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);
+Object.assign(sun.shadow.camera,{left:-.75,right:.75,top:.75,bottom:-.75,near:.5,far:5});sun.shadow.bias=-.0004;sun.target.position.set(-.1,0,.75);world.add(sun,sun.target);
+const fill=new T.DirectionalLight(0xbfe3df,.35);fill.position.set(-1,1,1.2);world.add(fill);
+const M=(c,r=.55,m=.05)=>new T.MeshStandardMaterial({color:c,roughness:r,metalness:m});
+const mFloor=M(0x141c20,.95,0),mTable=M(0x2b3a41,.85,0),mBoard=M(0xECEDEB,.8,0),mInk=new T.MeshBasicMaterial({color:0x2e3642}),mDark=M(0x202B30,.6,.2);
+const zcyl=(r,h)=>new T.CylinderGeometry(r,r,h,28).rotateX(Math.PI/2);
+const mk=(g,m,x,y,z,sh=true)=>{const o=new T.Mesh(g,m);o.position.set(x,y,z);o.castShadow=sh;o.receiveShadow=true;world.add(o);return o};
+mk(new T.PlaneGeometry(8,8),mFloor,0,0,0,false);
+mk(new T.BoxGeometry(.9,.6,.75),mTable,0,0,.375,false);
+mk(new T.PlaneGeometry(.9,.6),mBoard,0,0,.7503,false);
+{const w=.0032,z=.7505;       // 200 x 200 mm squares: near x=-0.24, far x=-0.04, y = -0.2, 0, 0.2
+ [-.24,-.04].forEach(x=>mk(new T.PlaneGeometry(w,.4032),mInk,x,0,z,false));
+ [-.2,0,.2].forEach(y=>mk(new T.PlaneGeometry(.2032,w),mInk,-.14,y,z,false))}
+// workspace outline the interface allows (dashed)
+{const B=BOUNDS,o=BASE_W,pts=[[B.x[0],B.y[0]],[B.x[1],B.y[0]],[B.x[1],B.y[1]],[B.x[0],B.y[1]],[B.x[0],B.y[0]]].map(p=>new T.Vector3(o.x+p[0],o.y+p[1],.7512));
+ const l=new T.Line(new T.BufferGeometry().setFromPoints(pts),new T.LineDashedMaterial({color:0x65B9AE,dashSize:.012,gapSize:.008}));l.computeLineDistances();world.add(l)}
+// cubes
+CUBES.forEach(c=>{c.mesh=mk(new T.BoxGeometry(.02,.02,.02),M(c.col,.5,0),c.p.x,c.p.y,c.p.z)});
+// robot meshes (real SO-101 STLs from the repo, welded + quantised)
+const robot=new T.Group();world.add(robot);
+const mYel=M(0xF0C419,.5,.05),mBlk=M(0x1c1c1c,.6,.1);
+const meshes=[];     // {mesh,body,G}
+const loadMsg=$('loadmsg');
+const NAMES=[...new Set(SO101.BODIES.flatMap(b=>b.G.map(g=>g.mesh)))];
+function parseBin(buf){
+  const dv=new DataView(buf),nv=dv.getUint32(0,true),nt=dv.getUint32(4,true),big=dv.getUint32(8,true);
+  const mn=[0,1,2].map(i=>dv.getFloat32(12+4*i,true)),sc=[0,1,2].map(i=>dv.getFloat32(24+4*i,true));
+  let off=36;const qd=new Uint16Array(buf,off,nv*3),pos=new Float32Array(nv*3);
+  for(let i=0;i<nv*3;i++)pos[i]=mn[i%3]+qd[i]*sc[i%3];
+  off+=nv*6;if(off%4)off+=4-off%4;
+  const idx=big?new Uint32Array(buf,off,nt*3):new Uint16Array(buf,off,nt*3);
+  const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(pos,3));g.setIndex(new T.BufferAttribute(idx,1));g.computeVertexNormals();return g}
+Promise.all(NAMES.map(n=>fetch('assets/'+n+'.txt').then(r=>{if(!r.ok)throw new Error(n);return r.text()}).then(t=>{const bin=atob(t),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return [n,parseBin(u.buffer)]})))
+.then(list=>{
+  const geo=Object.fromEntries(list);
+  SO101.BODIES.forEach((b,bi)=>b.G.forEach(g=>{const m=new T.Mesh(geo[g.mesh],g.col==='k'?mBlk:mYel);m.matrixAutoUpdate=false;m.castShadow=true;m.receiveShadow=true;m.frustumCulled=false;robot.add(m);meshes.push({m,bi,G:g.M})}));
+  loadMsg.style.display='none';log('SO-101 model loaded');
+}).catch(e=>{loadMsg.innerHTML='<b>Could not load the SO-101 model files.</b> Reload the page to try again.';});
+
+// Reacha display on a stand, with eye-tracker bar (faces the default camera)
+const mount=new T.Group();mount.position.set(-.34,.42,0);mount.rotation.z=Math.atan2(-.8,-.6);world.add(mount);
+{const add=(g,m,x,y,z)=>{const o=new T.Mesh(g,m);o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;mount.add(o);return o};
+ add(zcyl(.09,.02),mDark,0,0,.01);add(zcyl(.011,.88),mDark,-.03,0,.44);add(new T.BoxGeometry(.05,.03,.03),mDark,-.015,0,.88);
+ add(new T.BoxGeometry(.018,.4,.26),mDark,0,0,.99);
+ const sc2=document.createElement('canvas');sc2.width=640;sc2.height=400;const sx=sc2.getContext('2d');const tex=new T.CanvasTexture(sc2);tex.anisotropy=4;
+ const scr=new T.Mesh(new T.PlaneGeometry(.372,.232),new T.MeshBasicMaterial({map:tex}));
+ scr.quaternion.setFromRotationMatrix(new T.Matrix4().makeBasis(new T.Vector3(0,1,0),new T.Vector3(0,0,1),new T.Vector3(1,0,0)));scr.position.set(.0095,0,.99);mount.add(scr);
+ add(new T.BoxGeometry(.012,.17,.012),mDark,.014,0,.848);
+ const led=new T.Mesh(new T.SphereGeometry(.003,12,8),new T.MeshBasicMaterial({color:0x65B9AE}));led.position.set(.021,0,.848);mount.add(led);
+ let lastKey='';
+ window.__drawScreen=function(mv){
+  const key=[S.tracking,S.armed,S.pending,mv].join();if(key===lastKey)return;lastKey=key;
+  const w=640,h=400;sx.fillStyle='#F4F6F6';sx.fillRect(0,0,w,h);
+  sx.fillStyle='#174B50';sx.font='600 30px Inter,system-ui,sans-serif';sx.fillText('Reacha',24,48);
+  sx.font='500 16px Inter,system-ui,sans-serif';sx.fillStyle=S.tracking?'#174B50':'#A52E35';sx.fillText(S.tracking?'● Gaze ready':'● Gaze not ready',400,46);
+  sx.fillStyle=S.armed?'#174B50':'#A52E35';sx.fillText(S.armed?'● Simulated robot':'● Motion inhibited',200,46);
+  sx.fillStyle='#202B30';sx.fillRect(24,70,370,230);
+  sx.fillStyle='#fff';sx.font='500 14px Inter,system-ui,sans-serif';sx.fillText('CAM 01 / Workspace',36,92);sx.fillStyle='#9FB0B6';sx.fillText('Simulation · no video feed',36,286);
+  sx.strokeStyle='#65B9AE';sx.lineWidth=2;sx.beginPath();sx.arc(209,185,26,0,7);sx.stroke();sx.beginPath();sx.arc(209,185,4,0,7);sx.fillStyle='#65B9AE';sx.fill();
+  [['left','Left'],['fwd','Fwd'],['right','Right'],['up','Up'],['back','Back'],['down','Down']].forEach((c,i)=>{const x=412+(i%3)*72,y=70+Math.floor(i/3)*60,sel=S.pending===c[0];
+    sx.fillStyle=sel?'#E7F2F0':'#fff';sx.fillRect(x,y,66,54);sx.lineWidth=sel?3:1.5;sx.strokeStyle=sel?'#65B9AE':'#D9E1E3';sx.strokeRect(x,y,66,54);
+    sx.fillStyle='#202B30';sx.font='500 15px Inter,system-ui,sans-serif';sx.textAlign='center';sx.fillText(c[1],x+33,y+32);sx.textAlign='left'});
+  [['open','Open'],['close','Close']].forEach((c,i)=>{const x=412+i*108,y=196,sel=S.pending===c[0];
+    sx.fillStyle=sel?'#E7F2F0':'#fff';sx.fillRect(x,y,102,40);sx.lineWidth=sel?3:1.5;sx.strokeStyle=sel?'#65B9AE':'#D9E1E3';sx.strokeRect(x,y,102,40);
+    sx.fillStyle='#202B30';sx.textAlign='center';sx.fillText(c[1]+' grip',x+51,y+25);sx.textAlign='left'});
+  sx.fillStyle='#202B30';sx.font='600 17px Inter,system-ui,sans-serif';sx.fillText(S.pending?CMD[S.pending].t:'No command selected',24,336);
+  sx.font='400 13px Inter,system-ui,sans-serif';sx.fillStyle='#52636B';sx.fillText(S.pending?'Awaiting confirmation':(S.armed?'Hold your gaze to select a command.':'Movement locked.'),24,358);
+  sx.fillStyle='#A52E35';sx.fillRect(440,330,176,50);sx.fillStyle='#fff';sx.font='700 16px Inter,system-ui,sans-serif';sx.textAlign='center';sx.fillText('STOP MOTION',528,361);sx.textAlign='left';
+  led.material.color.set(S.tracking?0x65B9AE:0xE5636B);tex.needsUpdate=true;
+ };
+}
+// pending-step preview + tip marker on the board
+const ghost=new T.Mesh(new T.TorusGeometry(.011,.0016,8,28),new T.MeshBasicMaterial({color:0x65B9AE}));world.add(ghost);
+const gline=new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(),new T.Vector3()]),new T.LineDashedMaterial({color:0x65B9AE,dashSize:.006,gapSize:.005}));world.add(gline);
+const tipDot=new T.Mesh(new T.CircleGeometry(.008,24),new T.MeshBasicMaterial({color:0x65B9AE,transparent:true,opacity:.55}));world.add(tipDot);
+
+/* camera orbit (station frame, camera behind the robot at yaw 0) */
+const CEN=new T.Vector3(-.16,.1,.8);
+const cam={yaw:.75,pitch:.62,dist:.95,tY:.75,tP:.62,tD:.95};
+const PRE={work:[.75,.62,.95,'CAM 01 / Workspace'],top:[0,1.5,1.0,'CAM 02 / Overhead'],side:[1.5708,.14,1.1,'CAM 03 / Side']};
+document.querySelectorAll('.cams button').forEach(b=>b.onclick=()=>{
+  const p=PRE[b.dataset.cam];cam.tY=p[0];cam.tP=p[1];cam.tD=p[2];$('camLabel').textContent=p[3];
+  document.querySelectorAll('.cams button').forEach(x=>x.setAttribute('aria-pressed',x===b));
+});
+let drag=null;
+cv.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY};cv.setPointerCapture(e.pointerId)});
+cv.addEventListener('pointermove',e=>{if(!drag)return;cam.tY-=(e.clientX-drag.x)*.006;cam.tP=Math.min(1.5,Math.max(.05,cam.tP+(e.clientY-drag.y)*.006));drag={x:e.clientX,y:e.clientY}});
+cv.addEventListener('pointerup',()=>drag=null);cv.addEventListener('pointercancel',()=>drag=null);
+cv.addEventListener('wheel',e=>{e.preventDefault();cam.tD=Math.min(2.2,Math.max(.45,cam.tD+e.deltaY*.0012))},{passive:false});
+
+const baseM=new T.Matrix4().makeTranslation(BASE_W.x,BASE_W.y,BASE_W.z),_w=new T.Matrix4(),_v=new T.Vector3();
+const ease=t=>t*t*t*(10-15*t+6*t*t);
+let last=performance.now();
+function frame(){
+  requestAnimationFrame(frame);
+  const now=performance.now(),dt=Math.min(.05,(now-last)/1000);last=now;
+  cam.yaw+=(cam.tY-cam.yaw)*.12;cam.pitch+=(cam.tP-cam.pitch)*.12;cam.dist+=(cam.tD-cam.dist)*.12;
+  // arm motion: smooth joint-space move toward the IK solution of the confirmed step
+  if(S.t<1){S.t=Math.min(1,S.t+dt/S.dur);const e=ease(S.t);for(let j=0;j<4;j++)S.q[j]=S.qFrom[j]+(S.qGoal[j]-S.qFrom[j])*e}
+  const gd=S.gT-S.q[5],gs=2.4*dt;S.q[5]+=Math.abs(gd)<gs?gd:Math.sign(gd)*gs;
+  const ts=tipState();
+  // cubes: carried, falling, resting
+  CUBES.forEach((c,i)=>{
+    if(i===S.held){const tgtp=ts.p.clone().addScaledVector(ts.z,-.010).add(BASE_W);tgtp.z-=.002;c.p.lerp(tgtp,1-Math.exp(-dt*16));c.vz=0}
+    else{let rest=.76;CUBES.forEach((o,k)=>{if(k!==i&&Math.hypot(o.p.x-c.p.x,o.p.y-c.p.y)<.019&&o.p.z<c.p.z-.005)rest=Math.max(rest,o.p.z+.02)});
+      if(c.p.z>rest+1e-4){c.vz+=3*dt;c.p.z=Math.max(rest,c.p.z-c.vz*dt)}else{c.p.z=rest;c.vz=0}}
+    c.mesh.position.copy(c.p);
+  });
+  // dwell
+  if(hov){
+    if(!canSelect()){hov.classList.remove('dwell');hov.style.setProperty('--p',0);hov=null}
+    else{const p=Math.min(1,(now-hovStart)/S.dwell);hov.style.setProperty('--p',p);
+      if(p>=1){const c=hov.dataset.cmd;hov.classList.remove('dwell');hov.style.setProperty('--p',0);hov=null;setPending(c);log('Selected: '+CMD[c].t)}}
+  }
+  const mv=moving();
+  $('tArm').textContent=!S.armed?'Inhibited':(mv?'Moving':'Stationary');
+  $('sArmB').textContent=!S.armed?'Stop acknowledged (simulated)':(mv?'Arm moving':'Arm stationary');
+  $('tPos').textContent=[ts.p.x,ts.p.y,ts.p.z].map(v=>Math.round(v*1000)).join(' / ');
+  $('tGrip').textContent=S.held>=0?'Closed · holding '+CUBES[S.held].name+' cube':(S.q[5]>.45?'Open':S.q[5]<.0?'Closed':'Moving');
+  $('tSteps').textContent=S.steps;
+  $('btnGo').disabled=!S.pending||!canSelect()||mv;
+  // pose the model
+  if(meshes.length){SO101.fk(S.q,_mats);
+    meshes.forEach(o=>{_w.copy(baseM).multiply(_mats[o.bi]).multiply(o.G);o.m.matrix.copy(_w);o.m.matrixWorldNeedsUpdate=true});}
+  // preview + tip marker
+  tipDot.position.set(BASE_W.x+ts.p.x,BASE_W.y+ts.p.y,.7508);
+  const showG=S.pending&&CMD[S.pending].d&&S.armed;ghost.visible=gline.visible=!!showG;
+  if(showG){const m=CMD[S.pending].d;const g=clampB({x:S.tgt.x+m[0]*STEP,y:S.tgt.y+m[1]*STEP,z:S.tgt.z+m[2]*STEP});
+    const a=new T.Vector3(BASE_W.x+S.tgt.x,BASE_W.y+S.tgt.y,BASE_W.z+S.tgt.z),b=new T.Vector3(BASE_W.x+g.x,BASE_W.y+g.y,BASE_W.z+g.z);
+    ghost.position.copy(b);ghost.rotation.set(0,0,0);gline.geometry.setFromPoints([a,b]);gline.computeLineDistances()}
+  scene.background.lerp(S.armed?BG:BGR,.1);
+  window.__drawScreen&&window.__drawScreen(mv);
+  // camera: spherical around CEN, converted from station frame (z up) to three (y up)
+  const cp=Math.cos(cam.pitch);
+  const px=CEN.x-cam.dist*cp*Math.cos(cam.yaw),py=CEN.y-cam.dist*cp*Math.sin(cam.yaw),pz=CEN.z+cam.dist*Math.sin(cam.pitch);
+  camera.position.set(px,pz,-py);camera.lookAt(CEN.x,CEN.z,-CEN.y);
+  renderer.render(scene,camera);
+}
+render();log('Simulation ready · SO-101 arm stationary');frame();
+window.__S=S;
+})();
+</script>
+</body>
+</html>
