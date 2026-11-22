@@ -120,54 +120,6 @@ This separation allows individual components to be developed, tested and improve
 
 ![img3](assets/images/Reacha_Gaze-Control_Robotics_System_Architecture.webp)
 
-## High-level architecture
-
-```mermaid
-flowchart TB
-    subgraph USER["USER ENVIRONMENT"]
-        CAM["Logitech MX BRIO"]
-        EYE["Eye Tracking Engine"]
-        GAZE["Gaze Position & Dwell Detection"]
-        CAM --> EYE --> GAZE
-    end
-
-    subgraph CLIENT["INTERACTION LAYER"]
-        UI["REACHA Interface"]
-        SELECT["Object & Destination Selection"]
-        COMMAND["Interaction Controller"]
-        UI --> SELECT --> COMMAND
-    end
-
-    subgraph COMM["COMMUNICATION LAYER"]
-        API["HTTP / JSON API"]
-        PROXY["Web Interface / API Proxy"]
-        API --> PROXY
-    end
-
-    subgraph ROBOT["ROBOTICS LAYER"]
-        CAL["Workspace Calibration"]
-        GEO["Coordinate Transformation"]
-        PLAN["Motion Planning & Inverse Kinematics"]
-        EXEC["Trajectory Execution"]
-        CAL --> GEO --> PLAN --> EXEC
-    end
-
-    subgraph HARDWARE["REMOTE PHYSICAL ENVIRONMENT"]
-        ARM["SO-101 Robotic Arm"]
-        TABLE["Physical Workspace"]
-        OBJECTS["Manipulable Objects"]
-        ARM --> TABLE
-        TABLE --> OBJECTS
-    end
-
-    GAZE --> SELECT
-    COMMAND --> API
-    PROXY --> CAL
-    EXEC --> ARM
-    HARDWARE -. "Camera feedback" .-> PROXY
-```
-
-The diagram represents the logical system architecture. The individual components can also operate against the simulator during development and testing.
 
 ## Component architecture
 
@@ -314,40 +266,6 @@ The current application targets the JVM Desktop environment, supporting macOS, W
 
 Its architecture separates shared application logic from platform-specific implementations.
 
-```mermaid
-flowchart TB
-    subgraph APP["Kotlin Multiplatform Application"]
-        subgraph COMMON["commonMain - Shared Layer"]
-            UI["Compose UI"]
-            CTRL["StationController"]
-            GEO["Geometry"]
-            API["StationApi"]
-            MODELS["Models"]
-            UI --> CTRL
-            CTRL --> GEO
-            CTRL --> API
-            API --> MODELS
-        end
-
-        subgraph DESKTOP["desktopMain - Platform Layer"]
-            MAIN["Desktop Entry Point"]
-            IMAGE["Skia Image Decoding"]
-            HTTP["Ktor CIO HTTP Engine"]
-            MAIN --> IMAGE
-            MAIN --> HTTP
-        end
-
-        COMMON --> DESKTOP
-    end
-
-    subgraph BACKEND["Python Backend"]
-        SERVER["Simulator / Station API"]
-        ROBOT["Robotic Control Services"]
-        SERVER --> ROBOT
-    end
-
-    API <-->|"HTTP + JSON"| SERVER
-```
 
 ## Shared application layer
 
