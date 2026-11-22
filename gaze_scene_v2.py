@@ -7,10 +7,15 @@ import pickle
 import sys
 import threading
 import time
+import zlib
 
 import cv2
 import numpy as np
 import pygame
+
+from object_detect import ObjectDetector
+from robot_page import RobotPage, detect_blocks
+from work_area import find_work_area
 
 
 CAM_INDEX = 1              
@@ -18,7 +23,7 @@ SCENE_CAM_INDEX = 0
 ROTATE_180 = False            
 SCENE_ROTATE_180 = False  
 SCENE_SIZE = (1280, 720)
-AUTO_AREA_PART = "right"  
+AUTO_AREA_PART = "left"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CALIB_FILE = os.path.join(HERE, "eg_calibration.pkl")
@@ -46,19 +51,15 @@ SHOW_DONE = 3.0
 
 ADAPT = True
 ADAPT_RATE = 0.3
-ADAPT_MAX_STEP = 120
+ADAPT_MAX_STEP = 60
+ADAPT_MAX_TOTAL = 150
 ADAPT_WINDOW = 0.6
 
 DETECTOR = "blobs"
 
 BACKGROUND_FILE = os.path.join(HERE, "table_background.png")
-BLOB_THRESHOLD = 28
-BLOB_SHADOW_WEIGHT = 0.4
-BLOB_MIN_AREA = 1500
-BLOB_MAX_FRACTION = 0.25
-BLOB_IGNORE_EDGE = True
 SCENE_ROI = (0.0, 0.0, 0.5, 1.0)
-WORK_INSET_PX = 10
+WORK_INSET_PX = -10
 BLOB_YOLO_NAMES = True
 BLOB_YOLO_MIN_CONF = 0.60
 YOLO_MODEL = os.path.join(HERE, "yolo11n.onnx")
@@ -76,7 +77,8 @@ GRASPABLE = {"bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "b
              "sports ball", "hair drier", "keyboard", "handbag", "potted plant"}
 TRACK_MAX_JUMP = 150         
 TRACK_JUMP_FACTOR = 0.6     
-TRACK_KEEP_S = 1.5           
+TRACK_KEEP_S = 1.5
+TRACK_CONFIRM = 2
 COCO_NAMES = ["person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
               "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
               "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
@@ -101,17 +103,17 @@ TABLE_MARKERS_CM = {0: (-20.0, 40.0), 1: (20.0, 40.0), 2: (20.0, 10.0), 3: (-20.
 ARUCO_DICT = cv2.aruco.DICT_4X4_50
 USE_ARUCO = True             
 
-TABLE_POINTS_CM = [
-    ("top-left corner (top of the middle line)", (0.0, 50.0)),
-    ("top-right corner", (20.0, 50.0)),
-    ("bottom-right corner", (20.0, 10.0)),
-    ("bottom-left corner (bottom of the middle line)", (0.0, 10.0)),
-]
+PART_CORNERS_CM = {
+    "left":   [(-20.0, 50.0), (0.0, 50.0), (0.0, 10.0), (-20.0, 10.0)],
+    "right":  [(0.0, 50.0), (20.0, 50.0), (20.0, 10.0), (0.0, 10.0)],
+    "top":    [(-20.0, 50.0), (20.0, 50.0), (20.0, 30.0), (-20.0, 30.0)],
+    "bottom": [(-20.0, 30.0), (20.0, 30.0), (20.0, 10.0), (-20.0, 10.0)],
+}
+TABLE_POINTS_CM = list(zip(["top-left corner", "top-right corner", "bottom-right corner", "bottom-left corner"],
+                           PART_CORNERS_CM[AUTO_AREA_PART]))
 
-AUTO_AREA = True              
-AUTO_AREA_PART = "right"     
-AUTO_LINE_C = 25             
-AUTO_MIN_REGION = 0.02  
+AUTO_AREA = True
+AUTO_AREA_FRAMES = 5
 TABLE_CALIB_FILE = os.path.join(HERE, "table_calibration.json")
 
 OPERATIONS = [
@@ -121,8 +123,19 @@ OPERATIONS = [
     ("point", "Point at it", False),
 ]
 
-ARM_ENABLED = False    
+ARM_ENABLED = False
 CTX = "scene"
+
+ROBOT_PAGE = None
+ROBOT_TARGET = "sim"
+if "--robot-page" in sys.argv:
+    _i = sys.argv.index("--robot-page") + 1
+    ROBOT_PAGE = sys.argv[_i] if _i < len(sys.argv) and not sys.argv[_i].startswith("--") else "http://127.0.0.1:8820"
+if "--real" in sys.argv:
+    ROBOT_TARGET = "real"
+if ROBOT_PAGE:
+    OPERATIONS = [("hover", "Hover above A, then B", True)]
+    DEST_MODE = "free"
 
 BG, FG, DIM = (30, 30, 30), (235, 235, 235), (110, 110, 110)
 BLUE, ORANGE, RED, GREEN = (80, 140, 255), (255, 170, 60), (255, 90, 90), (90, 220, 120)
@@ -149,9 +162,6 @@ from eyeGestures.utils import VideoCapture
 
 
 def send_to_arm(operation, obj_name, obj_cm, dest_name=None, dest_cm=None):
-    """Replace the body with your arm's interface, e.g. over USB serial:
-        arm.write(f"{operation} {obj_cm[0]} {obj_cm[1]} {dest_cm[0] if dest_cm else ''} ...\\n".encode())
-    obj_cm / dest_cm are (x, y) in cm in the arm's frame (None if the table isn't calibrated)."""
     print(f"   [arm] {operation}: {obj_name} at {obj_cm} cm" + (f" -> {dest_name} at {dest_cm} cm" if dest_cm else ""))
 
 
@@ -168,7 +178,6 @@ cap = VideoCapture(CAM_INDEX)
 
 
 def new_calibration_map():
-    """Row by row, alternating direction (snake), so each eye movement is short."""
     pts = []
     for r, y in enumerate(CAL_GRID):
         row = CAL_GRID if r % 2 == 0 else CAL_GRID[::-1]
@@ -191,7 +200,7 @@ def get_event(calibrate):
     try:
         return gestures.step(frame, calibrate, W, H, context=CTX)
     except (TypeError, IndexError, ValueError):
-        return None, None          # no face in this frame
+        return None, None
 
 
 def poll_keys():
@@ -212,7 +221,6 @@ def text_center(s, y, f=font, color=FG):
 
 
 def message(lines, accept=(pygame.K_SPACE,)):
-    """Show text until one of the accepted keys is pressed; returns that key."""
     while True:
         keys = poll_keys()
         for k in accept:
@@ -265,13 +273,15 @@ def calibrate():
             clock.tick(60)
         clb.movePoint()
     try:
+        data = gestures.saveModel(context=CTX)
         with open(CALIB_FILE, "wb") as f:
-            f.write(gestures.saveModel(context=CTX))
+            f.write(data)
     except Exception as e:
         print(f"(could not save calibration: {e})")
 
 
-corr = np.array([1.0, 0.0, 1.0, 0.0]) 
+corr = np.array([1.0, 0.0, 1.0, 0.0])
+corr_base = corr.copy()
 
 
 def correct(raw):
@@ -279,9 +289,7 @@ def correct(raw):
 
 
 def drift_correct():
-    """Look at 5 crosses. Fixes both a shift AND the typical webcam 'squeeze toward the
-    center' (gaze estimates that don't reach the screen edges), per axis."""
-    global corr
+    global corr, corr_base
     spots = [(0.5, 0.5), (0.2, 0.25), (0.8, 0.25), (0.8, 0.75), (0.2, 0.75)]
     raw, true = [], []
     for fx, fy in spots:
@@ -311,24 +319,29 @@ def drift_correct():
             a, b = np.polyfit(raw[:, k], true[:, k], 1)
             a = float(np.clip(a, 0.6, 2.5))
             b = float(np.mean(true[:, k] - a * raw[:, k]))
-        else:                                           # only a shift
+        else:
             a, b = 1.0, float(np.mean(true[:, k] - raw[:, k]))
         new += [a, b]
     corr = np.array(new)
+    corr_base = corr.copy()
     print(f"Gaze correction: x' = {corr[0]:.2f}*x {corr[1]:+.0f},  y' = {corr[2]:.2f}*y {corr[3]:+.0f}")
-
-
 
 
 def finish():
     pygame.quit()
+    if ROBOT_PAGE and "scene" in globals():
+        scene.stop()
     for c in (cap, scene):
         try:
             c.close()
         except Exception:
             pass
     print("\n# Commands as (operation, object, object_cm, object_px, destination, destination_cm, destination_px)")
-    print("# cm = arm coordinates (None if the table isn't calibrated: press T); px = scene camera pixels")
+    if ROBOT_PAGE:
+        print("# px = robot camera pixels; cm = None here: the robot page converts px to arm coordinates itself "
+              "(see the 'robot page: ... arm x .. y .. cm' lines above)")
+    else:
+        print("# cm = arm coordinates (None if the table isn't calibrated: press T); px = scene camera pixels")
     print(f"commands = {commands}")
     sys.stdout.flush()
     os._exit(0)             
@@ -338,7 +351,6 @@ commands = []
 
 
 class SceneCamera:
-    """Reads the scene camera in a background thread; .frame is always the newest image."""
 
     def __init__(self, index):
         self.cap = cv2.VideoCapture(index)
@@ -368,39 +380,58 @@ class SceneCamera:
         self.cap.release()
 
 
-scene = SceneCamera(SCENE_CAM_INDEX)
+scene = RobotPage(ROBOT_PAGE) if ROBOT_PAGE else SceneCamera(SCENE_CAM_INDEX)
 aruco = cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(ARUCO_DICT), cv2.aruco.DetectorParameters())
 table_H = None                 
-table_source = None         
-work_poly = None            
-if os.path.exists(TABLE_CALIB_FILE):
+table_source = None
+work_poly = None
+saved_table_source = None
+if ROBOT_PAGE:
+    table_source = "robot page"
+elif os.path.exists(TABLE_CALIB_FILE):
     try:
         _tc = json.load(open(TABLE_CALIB_FILE))
-        if _tc.get("scene_cam_index") == SCENE_CAM_INDEX:
+        if _tc.get("scene_cam_index") != SCENE_CAM_INDEX:
+            print(f"(saved table calibration is for scene camera {_tc.get('scene_cam_index')} - ignored)")
+        elif _tc.get("part") != AUTO_AREA_PART:
+            print(f"(saved table calibration is for the {_tc.get('part', 'right')} part, not the "
+                  f"{AUTO_AREA_PART} part - ignored)")
+        else:
             table_H, table_source = np.array(_tc["H"], dtype=np.float64), "saved"
+            saved_table_source = _tc.get("source")
             if "clicked_px" in _tc:
                 work_poly = np.array(_tc["clicked_px"], np.float32)
             print(f"Loaded table calibration from {TABLE_CALIB_FILE}")
     except Exception as e:
         print(f"(could not load table calibration: {e})")
-view = {"s": 1.0, "ox": 0, "oy": 0, "fw": 1, "fh": 1}
+view = {"s": 1.0, "ox": 0, "oy": 0, "fw": 1, "fh": 1, "x0": 0, "y0": 0, "cw": 1, "ch": 1}
+ZOOM_TO_WORK_AREA = True
+ZOOM_MARGIN = 0.12
 
 
-def fit_view(fw, fh):
-    s = min(W / fw, H / fh)
-    view.update(s=s, ox=(W - fw * s) / 2, oy=(H - fh * s) / 2, fw=fw, fh=fh)
+def fit_view(fw, fh, zoom=False):
+    x0, y0, cw, ch = 0, 0, fw, fh
+    poly = work_area_poly(fw, fh) if zoom and ZOOM_TO_WORK_AREA else None
+    if poly is not None:
+        (ax, ay), (bx, by) = poly.min(0), poly.max(0)
+        m = ZOOM_MARGIN * max(bx - ax, by - ay)
+        cx0, cy0 = int(max(0, ax - m)), int(max(0, ay - m))
+        cx1, cy1 = int(min(fw, bx + m + 1)), int(min(fh, by + m + 1))
+        if cx1 - cx0 > 20 and cy1 - cy0 > 20:
+            x0, y0, cw, ch = cx0, cy0, cx1 - cx0, cy1 - cy0
+    s = min(W / cw, H / ch)
+    view.update(s=s, ox=(W - cw * s) / 2, oy=(H - ch * s) / 2, fw=fw, fh=fh, x0=x0, y0=y0, cw=cw, ch=ch)
 
 
 def img2scr(x, y):
-    return view["ox"] + x * view["s"], view["oy"] + y * view["s"]
+    return view["ox"] + (x - view["x0"]) * view["s"], view["oy"] + (y - view["y0"]) * view["s"]
 
 
 def scr2img(x, y):
-    return (x - view["ox"]) / view["s"], (y - view["oy"]) / view["s"]
+    return (x - view["ox"]) / view["s"] + view["x0"], (y - view["oy"]) / view["s"] + view["y0"]
 
 
 def detect_colors(frame):
-    """Largest blob of each color -> object. Positions in scene-image pixels."""
     small = cv2.resize(frame, None, fx=0.5, fy=0.5)
     hsv = cv2.cvtColor(cv2.GaussianBlur(small, (5, 5), 0), cv2.COLOR_BGR2HSV)
     kernel = np.ones((5, 5), np.uint8)
@@ -425,7 +456,6 @@ def detect_colors(frame):
 
 
 class YoloDetector:
-    """YOLO11n (80 COCO object types) with ONNX Runtime - no PyTorch needed."""
 
     def __init__(self):
         try:
@@ -440,7 +470,7 @@ class YoloDetector:
         opts.intra_op_num_threads = YOLO_THREADS
         opts.inter_op_num_threads = 1
         opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-        opts.add_session_config_entry("session.intra_op.allow_spinning", "0")   # don't busy-wait on cores
+        opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
         self.session = ort.InferenceSession(YOLO_MODEL, sess_options=opts, providers=["CPUExecutionProvider"])
         self.input = self.session.get_inputs()[0].name
 
@@ -467,16 +497,11 @@ class YoloDetector:
         return found
 
 
-background = {"img": None, "lab": None}    
-
-
-def _lab_small(frame):
-    small = cv2.resize(frame, None, fx=0.5, fy=0.5)
-    return cv2.cvtColor(cv2.GaussianBlur(small, (5, 5), 0), cv2.COLOR_BGR2LAB).astype(np.float32)
+background = {"img": None}
 
 
 def set_background(img):
-    background["img"], background["lab"] = img, _lab_small(img)
+    background["img"] = img
 
 
 def capture_background():
@@ -495,63 +520,8 @@ def capture_background():
     print(f"Empty-table picture saved to {BACKGROUND_FILE}")
 
 
-def color_name(hsv_pixels):
-    h, s, v = hsv_pixels[:, 0], hsv_pixels[:, 1], hsv_pixels[:, 2]
-    colorful = s > 70
-    if colorful.mean() < 0.35:
-        mv = np.median(v)
-        return "white" if mv > 190 else "black" if mv < 70 else "gray"
-    hue, val = np.median(h[colorful]), np.median(v[colorful])
-    if hue < 8 or hue >= 170:
-        return "red"
-    if hue < 20:
-        return "brown" if val < 150 else "orange"
-    if hue < 35:
-        return "yellow"
-    if hue < 85:
-        return "green"
-    if hue < 130:
-        return "blue"
-    if hue < 150:
-        return "purple"
-    return "pink"
-
-
-def detect_blobs(frame, namer=None):
-    """Any object = region that differs from the empty table (or from the table's main color)."""
-    lab = _lab_small(frame)
-    ref = background["lab"]
-    if ref is None or ref.shape != lab.shape:
-        ref = np.median(lab.reshape(-1, 3), axis=0)          
-    d = lab - ref
-    diff = np.sqrt((BLOB_SHADOW_WEIGHT * d[..., 0]) ** 2 + d[..., 1] ** 2 + d[..., 2] ** 2)
-    mask = (diff > BLOB_THRESHOLD).astype(np.uint8) * 255
-    area = work_area_poly(frame.shape[1], frame.shape[0])
-    if area is not None:                                  
-        inside = np.zeros_like(mask)
-        cv2.fillPoly(inside, [(area * 0.5).astype(np.int32)], 255)
-        inside = cv2.erode(inside, np.ones((9, 9), np.uint8))
-        mask &= inside
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    sh, sw = mask.shape
-    hsv = cv2.cvtColor(cv2.resize(frame, (sw, sh)), cv2.COLOR_BGR2HSV)
-    found = []
-    for c in contours:
-        area = cv2.contourArea(c) * 4
-        if area < BLOB_MIN_AREA or area > BLOB_MAX_FRACTION * sw * sh * 4:
-            continue
-        x, y, w, h = cv2.boundingRect(c)
-        if BLOB_IGNORE_EDGE and (x <= 1 or y <= 1 or x + w >= sw - 1 or y + h >= sh - 1):
-            continue
-        m = cv2.moments(c)
-        cx, cy = 2 * m["m10"] / m["m00"], 2 * m["m01"] / m["m00"]
-        obj_mask = np.zeros_like(mask)
-        cv2.drawContours(obj_mask, [c], -1, 255, -1)
-        label = f"{color_name(hsv[obj_mask > 0])} object"
-        found.append({"cls": "object", "label": label, "draw": class_color(label),
-                      "img": (cx, cy), "bbox": (2 * x, 2 * y, 2 * w, 2 * h)})
+def detect_blobs(frame, tracker, namer=None):
+    found = tracker(frame, work_area_poly(frame.shape[1], frame.shape[0]), background["img"])
     if namer is not None and found:
         for y_obj in namer(frame):                              
             if y_obj["conf"] < BLOB_YOLO_MIN_CONF:
@@ -568,6 +538,8 @@ def detect_blobs(frame, namer=None):
 
 
 def make_detector():
+    if ROBOT_PAGE:
+        return lambda frame: [] if work_poly is None else detect_blocks(frame, work_poly)
     if DETECTOR == "yolo":
         return YoloDetector()
     if DETECTOR == "color":
@@ -579,16 +551,16 @@ def make_detector():
             namer = YoloDetector()
         except (ImportError, SystemExit):
             print("(onnxruntime not installed: objects are named by color only)")
-    return lambda frame: detect_blobs(frame, namer)
+    tracker = ObjectDetector()
+    return lambda frame: detect_blobs(frame, tracker, namer)
 
 
 def class_color(name):
-    rng = np.random.default_rng(abs(hash(name)) % (2 ** 32))
+    rng = np.random.default_rng(zlib.crc32(name.encode()))
     return tuple(int(v) for v in rng.integers(90, 255, 3))
 
 
 class DetectionWorker:
-    """Runs the detector on the newest scene frame in a background thread."""
 
     def __init__(self, detect):
         self.detect, self.results, self.stamp, self.fps = detect, [], 0.0, 0.0
@@ -624,34 +596,37 @@ last_stamp = 0.0
 
 
 def update_tracks(dets, now):
-    free = list(range(len(dets)))
-    for tr in sorted(tracks, key=lambda t: -t["last"]):
-        best, best_d = None, None
-        for j in free:
-            if dets[j]["cls"] != tr["cls"]:
+    pairs = []
+    for i, tr in enumerate(tracks):
+        for j, d in enumerate(dets):
+            if d["cls"] != tr["cls"]:
                 continue
-            _, _, w, h = dets[j]["bbox"]
-            limit = max(TRACK_MAX_JUMP, TRACK_JUMP_FACTOR * math.hypot(w, h))
-            d = math.dist(dets[j]["img"], tr["img"])
-            if d < limit and (best_d is None or d < best_d):
-                best, best_d = j, d
-        if best is not None:
-            tr.update(img=dets[best]["img"], bbox=dets[best]["bbox"], last=now)
-            new_label = dets[best].get("label")
-            if new_label and new_label != tr.get("label") and not new_label.endswith(" object") \
-                    and tr.get("label", "").endswith(" object") and state == "object":
-                used = {t["n"] for t in tracks if t.get("label") == new_label}
-                n = next(k for k in range(1, 100) if k not in used)
-                tr.update(label=new_label, n=n, name=new_label if n == 1 else f"{new_label} {n}")
-            free.remove(best)
+            _, _, w, h = d["bbox"]
+            dist = math.dist(d["img"], tr["img"])
+            if dist < max(TRACK_MAX_JUMP, TRACK_JUMP_FACTOR * math.hypot(w, h)):
+                pairs.append((dist, i, j))
+    matched, free = set(), set(range(len(dets)))
+    for _, i, j in sorted(pairs):
+        if i in matched or j not in free:
+            continue
+        matched.add(i)
+        free.discard(j)
+        tr = tracks[i]
+        tr.update(img=dets[j]["img"], bbox=dets[j]["bbox"], last=now, hits=tr["hits"] + 1)
+        new_label = dets[j].get("label")
+        if new_label and new_label != tr.get("label") and not new_label.endswith(" object") \
+                and tr.get("label", "").endswith(" object") and state == "object":
+            used = {t["n"] for t in tracks if t.get("label") == new_label}
+            n = next(k for k in range(1, 100) if k not in used)
+            tr.update(label=new_label, n=n, name=new_label if n == 1 else f"{new_label} {n}")
     tracks[:] = [t for t in tracks if now - t["last"] < TRACK_KEEP_S]
-    for j in free:
+    for j in sorted(free):
         d = dets[j]
         label = d.get("label", d["cls"])
         used = {t["n"] for t in tracks if t["label"] == label}
         n = next(k for k in range(1, 100) if k not in used)
         tracks.append({"name": label if n == 1 else f"{label} {n}", "cls": d["cls"], "label": label, "n": n,
-                       "draw": d["draw"], "img": d["img"], "bbox": d["bbox"], "last": now})
+                       "draw": d["draw"], "img": d["img"], "bbox": d["bbox"], "last": now, "hits": 1})
 
 
 def update_table(frame):
@@ -710,16 +685,15 @@ def click_table_calibration():
     table_H, _ = cv2.findHomography(src, dst)
     table_source = "clicked"
     work_poly = src
-    json.dump({"scene_cam_index": SCENE_CAM_INDEX, "H": table_H.tolist(),
+    json.dump({"scene_cam_index": SCENE_CAM_INDEX, "part": AUTO_AREA_PART, "source": "clicked", "H": table_H.tolist(),
                "clicked_px": src.tolist(), "points_cm": dst.tolist()}, open(TABLE_CALIB_FILE, "w"), indent=2)
     print(f"Table calibrated by clicks, saved to {TABLE_CALIB_FILE}")
 
 
 def work_area_poly(fw, fh):
-    """The work area as a polygon in scene-image pixels (None = whole image)."""
     if work_poly is not None:
         return work_poly
-    if SCENE_ROI is None:
+    if SCENE_ROI is None or ROBOT_PAGE:
         return None
     l, t, r, b = SCENE_ROI
     return np.array([(l * fw, t * fh), (r * fw, t * fh), (r * fw, b * fh), (l * fw, b * fh)], np.float32)
@@ -732,222 +706,31 @@ def in_work_area(x, y, fw, fh):
     return cv2.pointPolygonTest(poly, (float(x), float(y)), True) >= WORK_INSET_PX
 
 
-def order_corners(q):
-    """4 points -> top-left, top-right, bottom-right, bottom-left (image coordinates)."""
-    q = np.asarray(q, np.float32)
-    s, d = q.sum(1), q[:, 1] - q[:, 0]
-    return np.array([q[np.argmin(s)], q[np.argmin(d)], q[np.argmax(s)], q[np.argmax(d)]], np.float32)
-
-
-def ink_mask(frame, work_w=640):
-    """White where the image is clearly darker than its surroundings (drawn black lines). Returns (mask, scale)."""
-    h, w = frame.shape[:2]
-    s = work_w / w
-    small = cv2.resize(frame, (work_w, int(round(h * s))))
-    gray = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), (3, 3), 0)
-    lines = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 31, AUTO_LINE_C)
-    lines = cv2.morphologyEx(lines, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))    # bridge small gaps
-    return cv2.dilate(lines, np.ones((3, 3), np.uint8)), s
-
-
-
-def _fit(points):
-    vx, vy, x0, y0 = cv2.fitLine(np.asarray(points, np.float32), cv2.DIST_HUBER, 0, 0.01, 0.01).flatten()
-    return np.array([x0, y0]), np.array([vx, vy])
-
-def _intersect(l1, l2):
-    (p, r), (q, s) = l1, l2
-    den = r[0] * s[1] - r[1] * s[0]
-    if abs(den) < 1e-6:
-        return None
-    t = ((q[0] - p[0]) * s[1] - (q[1] - p[1]) * s[0]) / den
-    return p + t * r
-
-def _clusters(segs, key, gap):
-    """Group segments whose position (key) is close; return list of point lists, sorted by key."""
-    segs = sorted(segs, key=key)
-    groups, cur, last = [], [], None
-    for sg in segs:
-        k = key(sg)
-        if last is not None and k - last > gap:
-            groups.append(cur); cur = []
-        cur.append(sg); last = k
-    if cur:
-        groups.append(cur)
-    return [([(s[0], s[1]) for s in g] + [(s[2], s[3]) for s in g], sum(np.hypot(s[2]-s[0], s[3]-s[1]) for s in g))
-            for g in groups]
-
-def _frame_from_group(mask, paper, bbox, part):
-    x, y, w, h = bbox
-    size = min(w, h)
-    segs = cv2.HoughLinesP(paper, 1, np.pi / 180, threshold=max(20, int(0.1 * size)),
-                           minLineLength=int(0.15 * size), maxLineGap=int(0.08 * size))
-    if segs is None:
-        return None
-    segs = [tuple(map(float, s)) for s in segs[:, 0]]
-    vert = [s for s in segs if abs(s[3] - s[1]) > abs(s[2] - s[0])]
-    horiz = [s for s in segs if abs(s[3] - s[1]) <= abs(s[2] - s[0])]
-
-    def keep_parallel(family, vertical):
-        """Drop stray strokes: keep segments within 15 degrees of the family's typical direction."""
-        if not family:
-            return family
-        ang = [np.degrees(np.arctan2(s[3] - s[1], s[2] - s[0])) for s in family]
-        if vertical:
-            ang = [a % 180 for a in ang]                       # 0..180, vertical ~ 90
-        else:
-            ang = [((a + 90) % 180) - 90 for a in ang]         # -90..90, horizontal ~ 0
-        lens = [np.hypot(s[2] - s[0], s[3] - s[1]) for s in family]
-        order = np.argsort(ang)
-        cum = np.cumsum(np.array(lens)[order])
-        med = np.array(ang)[order][np.searchsorted(cum, cum[-1] / 2)]   # length-weighted median
-        return [s for s, a in zip(family, ang) if abs(a - med) <= 15]
-    vert, horiz = keep_parallel(vert, True), keep_parallel(horiz, False)
-    cy, cx = y + h / 2, x + w / 2
-    def x_at_mid(s):
-        x1, y1, x2, y2 = s
-        return x1 + (x2 - x1) * (cy - y1) / (y2 - y1) if y2 != y1 else x1
-    def y_at_mid(s):
-        x1, y1, x2, y2 = s
-        return y1 + (y2 - y1) * (cx - x1) / (x2 - x1) if x2 != x1 else y1
-    vg = [g for g in _clusters(vert, x_at_mid, 0.06 * w) if g[1] > 0.3 * h]    
-    hg = [g for g in _clusters(horiz, y_at_mid, 0.06 * h) if g[1] > 0.3 * w]
-    if len(vg) < 2 or len(hg) < 2:
-        return None
-    if (part in ("left", "right") and len(vg) < 3) or (part in ("top", "bottom") and len(hg) < 3):
-        return None                    
-    V = [_fit(g[0]) for g in vg]
-    Hl = [_fit(g[0]) for g in hg]
-    if part == "left":
-        sides, ends = (V[0], V[1]), (Hl[0], Hl[-1])
-    elif part == "right":
-        sides, ends = (V[-2], V[-1]), (Hl[0], Hl[-1])
-    elif part == "top":
-        sides, ends = (V[0], V[-1]), (Hl[0], Hl[1])
-    elif part == "bottom":
-        sides, ends = (V[0], V[-1]), (Hl[-2], Hl[-1])
-    else:
-        sides, ends = (V[0], V[-1]), (Hl[0], Hl[-1])
-    pts = [_intersect(ends[0], sides[0]), _intersect(ends[0], sides[1]),
-           _intersect(ends[1], sides[1]), _intersect(ends[1], sides[0])]
-    if any(p is None for p in pts):
-        return None
-    return np.array(pts, np.float32), len(vg), len(hg)
-
-
-def _valid(quad, mask):
-    """A real work area: convex, big enough, and its inside mostly free of ink (empty paper)."""
-    H, W = mask.shape
-    q = quad.astype(np.float32)
-    if not cv2.isContourConvex(q.reshape(-1, 1, 2)):
-        return False
-    if cv2.contourArea(q) < 0.02 * W * H:
-        return False
-    if min(np.linalg.norm(q[i] - q[(i + 1) % 4]) for i in range(4)) < 0.08 * min(W, H):
-        return False
-    if q[:, 0].min() < -0.05 * W or q[:, 0].max() > 1.05 * W or q[:, 1].min() < -0.05 * H or q[:, 1].max() > 1.05 * H:
-        return False                                          # corners must be (about) inside the image
-    near = cv2.dilate(mask, np.ones((7, 7), np.uint8))
-    support = []
-    for i in range(4):                                        # every edge must be a drawn (maybe dashed) line
-        a_, b_ = q[i], q[(i + 1) % 4]
-        t = np.linspace(0.1, 0.9, 40)[:, None]
-        pts = (a_ + t * (b_ - a_)).astype(int)
-        pts[:, 0] = pts[:, 0].clip(0, W - 1)
-        pts[:, 1] = pts[:, 1].clip(0, H - 1)
-        support.append((near[pts[:, 1], pts[:, 0]] > 0).mean())
-    if min(support) < 0.35 or np.mean(support) < 0.55:
-        return False
-    c = q.mean(0)
-    inner = (c + 0.8 * (q - c)).astype(np.int32)              # shrink 20 % to stay off the lines
-    m = np.zeros_like(mask)
-    cv2.fillPoly(m, [inner], 255)
-    inside = m > 0
-    return inside.sum() > 0 and (mask[inside] > 0).mean() < 0.12
-
-
-def paper_part_lines(mask, part="left"):
-    """mask: white = black ink. Find the paper's border + divider as straight lines (Hough) and return
-    (4 corners TL, TR, BR, BL of the requested part, n vertical, n horizontal) in mask pixels, or None."""
-    H, W = mask.shape
-    k = max(5, int(0.012 * W)) | 1
-    grouped = cv2.dilate(mask, np.ones((k, k), np.uint8))       # join line pieces separated by small gaps
-    n, lab, stats, _ = cv2.connectedComponentsWithStats(grouped, 8)
-    cands = [i for i in range(1, n) if stats[i][2] > 0.1 * W and stats[i][3] > 0.1 * H]
-    for i in sorted(cands, key=lambda i: -stats[i][2] * stats[i][3]):   # biggest line groups first
-        paper = ((lab == i) & (mask > 0)).astype(np.uint8) * 255
-        res = _frame_from_group(mask, paper, stats[i][:4], part)
-        if res is not None and _valid(res[0], mask):
-            return res
-    return None
-
-
-def find_line_regions(frame, work_w=640):
-    """Fallback: regions completely enclosed by dark drawn lines, each as 4 corners."""
-    lines, s = ink_mask(frame, work_w)
-    n, lab, stats, cents = cv2.connectedComponentsWithStats(cv2.bitwise_not(lines), 4)
-    sh, sw = lines.shape
-    regions = []
-    for i in range(1, n):
-        x, y, ww, hh, area = stats[i]
-        if x <= 0 or y <= 0 or x + ww >= sw or y + hh >= sh or area < AUTO_MIN_REGION * sw * sh:
-            continue                               
-        cnts, _ = cv2.findContours((lab == i).astype(np.uint8) * 255, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        c = max(cnts, key=cv2.contourArea)
-        hull = cv2.convexHull(c)
-        peri, quad = cv2.arcLength(hull, True), None
-        for eps in np.linspace(0.01, 0.12, 23):
-            ap = cv2.approxPolyDP(hull, eps * peri, True)
-            if len(ap) == 4:
-                quad = ap.reshape(4, 2)
-                break
-        if quad is None:
-            quad = cv2.boxPoints(cv2.minAreaRect(c))
-        regions.append({"quad": order_corners(quad) / s, "center": (cents[i][0] / s, cents[i][1] / s),
-                        "area": area / (s * s)})
-    return regions
-
-
-def pick_region(regions):
-    key = {"left": lambda r: r["center"][0], "right": lambda r: -r["center"][0],
-           "top": lambda r: r["center"][1], "bottom": lambda r: -r["center"][1],
-           "largest": lambda r: -r["area"]}[AUTO_AREA_PART]
-    return min(regions, key=key)
-
-
 def auto_table_calibration(preview_s=1.5):
-    """Find the regions enclosed by black lines, use the chosen one as work area + table calibration."""
     global table_H, table_source, work_poly
-    frame, t0 = None, time.time()
-    while frame is None and time.time() - t0 < 3:
-        frame = scene.read()
-        time.sleep(0.05)
-    if frame is None:
+    frames, t0 = [], time.time()
+    while len(frames) < AUTO_AREA_FRAMES and time.time() - t0 < 3:
+        f = scene.read()
+        if f is not None and (not frames or not np.array_equal(f, frames[-1])):
+            frames.append(f)
+        time.sleep(0.1)
+    if not frames:
         print("No scene image - cannot look for the black lines.")
         return False
-    mask, sc = ink_mask(frame)
-    found = paper_part_lines(mask, AUTO_AREA_PART)        
-    if found is not None:
-        quad = found[0] / sc
-        regions = [{"quad": quad}]
-        chosen = regions[0]
-        method = f"lines: {found[1]} vertical, {found[2]} horizontal"
-    else:                                                    
-        regions = find_line_regions(frame)
-        if not regions:
-            print("Black lines not found - check that the border and the middle line are in view "
-                  "(run examples/detect_area.py to see what the camera sees), or press T and click the corners.")
-            return False
-        chosen = pick_region(regions)
-        quad = chosen["quad"]
-        method = f"enclosed regions: {len(regions)}"
+    found = find_work_area(frames, AUTO_AREA_PART)
+    if found is None:
+        print("Black lines not found - check that the whole border and the middle line are in view, or press T "
+              "and click the corners.  Check a photo with:  python examples/work_area.py photo.jpg left out.png")
+        return False
+    quad = found["quad"].astype(np.float32)
     table_H, _ = cv2.findHomography(quad, np.array([cm for _, cm in TABLE_POINTS_CM], np.float32))
     table_source, work_poly = "black lines", quad
-    json.dump({"scene_cam_index": SCENE_CAM_INDEX, "H": table_H.tolist(), "clicked_px": quad.tolist(),
-               "points_cm": [list(cm) for _, cm in TABLE_POINTS_CM], "source": "black lines"},
-              open(TABLE_CALIB_FILE, "w"), indent=2)
-    print(f"Work area found from black lines ({method}), using the {AUTO_AREA_PART} part, "
+    json.dump({"scene_cam_index": SCENE_CAM_INDEX, "part": AUTO_AREA_PART, "source": "black lines",
+               "H": table_H.tolist(), "clicked_px": quad.tolist(),
+               "points_cm": [list(cm) for _, cm in TABLE_POINTS_CM]}, open(TABLE_CALIB_FILE, "w"), indent=2)
+    print(f"Work area found from black lines: the {AUTO_AREA_PART} part, confidence {found['confidence']:.2f}, "
           f"corners {np.round(quad).astype(int).tolist()}")
+    frame = frames[-1]
     fit_view(frame.shape[1], frame.shape[0])
     surf = frame_surface(frame)
     t0 = time.time()
@@ -955,10 +738,9 @@ def auto_table_calibration(preview_s=1.5):
         pygame.event.pump()
         screen.fill(BG)
         screen.blit(surf, (view["ox"], view["oy"]))
-        for r in regions:
-            pts = [img2scr(*p) for p in r["quad"]]
-            pygame.draw.polygon(screen, GREEN if r is chosen else (150, 150, 150), pts, 5 if r is chosen else 2)
-        text_center(f"Work area: the {AUTO_AREA_PART} region enclosed by black lines", 40, font, GREEN)
+        pygame.draw.polygon(screen, (150, 150, 150), [img2scr(*p) for p in found["paper_quad"]], 2)
+        pygame.draw.polygon(screen, GREEN, [img2scr(*p) for p in quad], 5)
+        text_center(f"Work area: the {AUTO_AREA_PART} part of the paper", 40, font, GREEN)
         pygame.display.flip()
         clock.tick(30)
     return True
@@ -983,7 +765,6 @@ CANCEL_POS = (W - 140, H - 150)
 
 
 def buttons():
-    """Operation buttons in a column on the right, plus Cancel."""
     bw, bh, gap = int(W * 0.24), int(H * 0.13), int(H * 0.035)
     items = [(k, label) for k, label, _ in OPERATIONS] + [("cancel", "Cancel")]
     total = len(items) * bh + (len(items) - 1) * gap
@@ -1008,15 +789,13 @@ def gaze_distance(gaze, center, payload):
 
 
 def dest_zones():
-    """Drop zones in scene-image coordinates. On the calibrated table area if available,
-    otherwise on the middle 70 % of the camera image. Rows A (far) .. C (near), columns 1..3."""
     cols, rows = DEST_ZONES
     if table_H is not None:
         xs = [p[0] for _, p in TABLE_POINTS_CM]
         ys = [p[1] for _, p in TABLE_POINTS_CM]
         inv = np.linalg.inv(table_H)
 
-        def at(u, v):          # u: left -> right, v: far -> near, in cm space
+        def at(u, v):
             cm = np.array([[[min(xs) + u * (max(xs) - min(xs)), max(ys) - v * (max(ys) - min(ys))]]], np.float32)
             return tuple(float(t) for t in cv2.perspectiveTransform(cm, inv)[0, 0])
     else:
@@ -1053,23 +832,29 @@ def frame_surface(frame, dim=False):
         rgb = np.where(mask[..., None] > 0, rgb, (rgb * 0.3).astype(np.uint8))
     if dim:
         rgb = (rgb * 0.45).astype(np.uint8)
-    size = (int(view["fw"] * view["s"]), int(view["fh"] * view["s"]))
+    x0, y0, cw, ch = view["x0"], view["y0"], view["cw"], view["ch"]
+    rgb = np.ascontiguousarray(rgb[y0:y0 + ch, x0:x0 + cw])
+    size = (int(cw * view["s"]), int(ch * view["s"]))
     rgb = cv2.resize(rgb, size)
     return pygame.image.frombuffer(rgb.tobytes(), size, "RGB")
 
 
-if os.path.exists(CALIB_FILE):
+if os.path.exists(CALIB_FILE) and os.path.getsize(CALIB_FILE) > 0:
     key = message(["Calibration found", "L = load the saved calibration (same seat, same camera position)",
                    "K = calibrate again"], accept=(pygame.K_l, pygame.K_k))
     if key == pygame.K_l:
-        with open(CALIB_FILE, "rb") as f:
-            gestures.loadModel(f.read(), context=CTX)
+        try:
+            with open(CALIB_FILE, "rb") as f:
+                gestures.loadModel(f.read(), context=CTX)
+        except Exception as e:
+            print(f"(saved calibration is broken: {e} - calibrating again)")
+            calibrate()
     else:
         calibrate()
 else:
     calibrate()
 
-if AUTO_AREA and table_source != "saved":
+if AUTO_AREA and saved_table_source != "clicked" and not ROBOT_PAGE:
     auto_table_calibration()
 
 message(["Look at the world",
@@ -1082,7 +867,7 @@ drift_correct()
 state = "object"           
 chosen = operation = dest = None
 dwell = {}                 
-spot_anchor, spot_dwell = None, 0.0
+spot_anchor, spot_dwell, spot_pts = None, 0.0, []
 state_until = 0.0
 show_gaze = True
 recent, pre_sel = [], []
@@ -1093,20 +878,22 @@ last_frame = None
 last_on_id = None
 zones = []
 grace_until = 0.0
+robot_reported = None
+robot_flash = ("", 0.0)
 
 
 def adapt_to(pos):
     if ADAPT and len(pre_sel) >= 5:
         seen = np.median(np.array([p[1:] for p in pre_sel]), axis=0)
         step = np.clip(ADAPT_RATE * (np.array(pos) - seen), -ADAPT_MAX_STEP, ADAPT_MAX_STEP)
-        corr[1] += step[0]
-        corr[3] += step[1]
+        corr[1] = np.clip(corr[1] + step[0], corr_base[1] - ADAPT_MAX_TOTAL, corr_base[1] + ADAPT_MAX_TOTAL)
+        corr[3] = np.clip(corr[3] + step[1], corr_base[3] - ADAPT_MAX_TOTAL, corr_base[3] + ADAPT_MAX_TOTAL)
 
 
 def reset_flow():
-    global state, chosen, operation, dest, spot_anchor, spot_dwell
+    global state, chosen, operation, dest, spot_anchor, spot_dwell, spot_pts
     state, chosen, operation, dest = "object", None, None, None
-    spot_anchor, spot_dwell = None, 0.0
+    spot_anchor, spot_dwell, spot_pts = None, 0.0, []
     dwell.clear()
 
 
@@ -1130,7 +917,11 @@ def finish_command(now):
         f.write(json.dumps(rec) + "\n")
     print(f"COMMAND: {operation[1]} | {chosen['name']} at {obj_cm} cm, pixel {obj_px}"
           + (f" -> {dest['name']} at {dest_cm} cm, pixel {dest_px}" if dest else ""))
-    if obj_cm is None:
+    if ROBOT_PAGE:
+        if dest:
+            scene.go(*dest["img"], target=ROBOT_TARGET, label="the chosen place (B)")
+        print(f"   -> robot page ({'REAL arm' if ROBOT_TARGET == 'real' else 'simulator'}): above A {obj_px}, then B {dest_px}")
+    elif obj_cm is None:
         print("   (table not calibrated: press T and click 4 known points - cm unknown, pixels given)")
     if ARM_ENABLED and obj_cm is not None:
         send_to_arm(operation[0], chosen["name"], obj_cm, dest["name"] if dest else None, dest_cm)
@@ -1143,11 +934,17 @@ while True:
         reset_flow()
     if pygame.K_g in keys:
         show_gaze = not show_gaze
-    if pygame.K_t in keys:
+    if pygame.K_s in keys and ROBOT_PAGE:
+        print("STOP: robot page soft stop" if scene.stop() else "STOP failed - use the robot page's Stop")
+        reset_flow()
+    if pygame.K_t in keys and not ROBOT_PAGE:
         click_table_calibration()
         reset_flow()
     if pygame.K_a in keys:
-        auto_table_calibration()
+        if ROBOT_PAGE:
+            scene.recalibrate()
+        else:
+            auto_table_calibration()
         tracks.clear()
         reset_flow()
     if pygame.K_b in keys:
@@ -1166,14 +963,24 @@ while True:
     frame = scene.read()
     if frame is not None:
         last_frame = frame
-        fit_view(frame.shape[1], frame.shape[0])
-        markers_seen = update_table(frame)
+        if ROBOT_PAGE:
+            work_poly = scene.polygon()
+        else:
+            markers_seen = update_table(frame)
+        fit_view(frame.shape[1], frame.shape[0], zoom=True)
+    if ROBOT_PAGE and scene.last_result is not None and scene.last_result is not robot_reported:
+        robot_reported = scene.last_result
+        print(("   robot page: " if robot_reported[0] else "   robot page REFUSED: ") + robot_reported[1])
+        if not robot_reported[0]:
+            robot_flash = (f"Robot: {robot_reported[1]}", time.time() + 6.0)
+            if state == "destination":
+                reset_flow()
     dets, stamp = detector.get()
     if stamp != last_stamp:
         last_stamp = stamp
         dets = [d for d in dets if in_work_area(*d["img"], view["fw"], view["fh"])]
         update_tracks(dets, stamp)
-    objects = [t for t in tracks if time.time() - t["last"] < TRACK_KEEP_S]
+    objects = [t for t in tracks if time.time() - t["last"] < TRACK_KEEP_S and t["hits"] >= TRACK_CONFIRM]
 
     ev, _ = get_event(False)
     now = time.time()
@@ -1199,11 +1006,11 @@ while True:
     elif state == "operation":
         targets = [(b["key"], b["pos"], DWELL_BUTTON_S, b) for b in buttons()]
     elif state == "destination":
-        targets = [(o["name"], img2scr(*o["img"]), DWELL_OBJECT_S, o) for o in objects
-                   if o["name"] != chosen["name"]]
+        targets = [] if ROBOT_PAGE else [(o["name"], img2scr(*o["img"]), DWELL_OBJECT_S, o) for o in objects
+                                         if o["name"] != chosen["name"]]
         if DEST_MODE == "zones":
             zones = dest_zones()
-            for z in zones:                            # a zone with an object standing in it is occupied
+            for z in zones:
                 zx, zy = z["img"]
                 z["occupied"] = any(o["bbox"][0] <= zx <= o["bbox"][0] + o["bbox"][2] and
                                     o["bbox"][1] <= zy <= o["bbox"][1] + o["bbox"][3] for o in objects)
@@ -1214,13 +1021,13 @@ while True:
     on = None
     if gaze is not None and not moving and targets and state != "done":
         dists = [gaze_distance(gaze, p, payload) for _, p, _, payload in targets]
-        best = int(np.argmin(dists))                # the closest target wins...
+        best = int(np.argmin(dists))
         ids = [t[0] for t in targets]
-        if last_on_id in ids:                       # ...unless the current one is nearly as close
+        if last_on_id in ids:
             li = ids.index(last_on_id)
             if dists[li] - dists[best] < HYSTERESIS_PX:
                 best = li
-        if math.exp(-dists[best] ** 2 / (2 * SIGMA ** 2)) >= ON_INPUT:   # close enough to count at all
+        if math.exp(-dists[best] ** 2 / (2 * SIGMA ** 2)) >= ON_INPUT:
             on = best
     last_on_id = targets[on][0] if on is not None else None
 
@@ -1236,28 +1043,35 @@ while True:
         else:
             dwell[tid] = max(0.0, dwell.get(tid, 0.0) - DECAY * dt)
 
-    if DEST_MODE == "free" and state == "destination" and gaze is not None and on is None and not moving:
+    if DEST_MODE == "free" and state == "destination" and gaze is not None and on is None and not moving \
+            and now >= grace_until and math.dist(gaze, img2scr(*chosen["img"])) > 0.6 * SPOT_RADIUS:
         ix, iy = scr2img(*gaze)
-        inside = 0 <= ix < view["fw"] and 0 <= iy < view["fh"]
+        inside = 0 <= ix < view["fw"] and 0 <= iy < view["fh"] and in_work_area(ix, iy, view["fw"], view["fh"])
         if inside:
             if spot_anchor is None or math.dist(gaze, spot_anchor) > SPOT_RADIUS:
-                spot_anchor, spot_dwell = gaze, 0.0
+                spot_anchor, spot_dwell, spot_pts = gaze, 0.0, []
+            spot_pts.append(gaze)
+            spot_anchor = tuple(np.median(np.array(spot_pts), axis=0))
             spot_dwell += dt
     elif DEST_MODE == "free" and state == "destination":
         spot_dwell = max(0.0, spot_dwell - DECAY * dt)
 
-    if state == "done" and now >= state_until:
+    if state == "done" and now >= state_until and not (ROBOT_PAGE and scene.pending()):
         reset_flow()
     if on is not None:
         tid, pos, need, payload = targets[on]
         if dwell.get(tid, 0) >= need:
-            if "zone" not in payload:
+            if state == "object":
                 adapt_to(pos)
             dwell.clear()
             grace_until = now + STEP_GRACE_S
             if state == "object":
                 chosen, state = dict(payload), "operation"
                 print(f"OBJECT: {chosen['name']} at scene pixel {tuple(round(v) for v in chosen['img'])}")
+                if ROBOT_PAGE:
+                    operation = OPERATIONS[0]
+                    scene.go(*chosen["img"], target=ROBOT_TARGET, label=f"{chosen['name']} (A)")
+                    state, spot_anchor, spot_dwell, spot_pts = "destination", None, 0.0, []
             elif state == "operation":
                 if tid == "cancel":
                     reset_flow()
@@ -1276,14 +1090,14 @@ while True:
     if state == "destination" and spot_anchor is not None and spot_dwell >= DWELL_SPOT_S:
         sx, sy = scr2img(*spot_anchor)
         dest = {"name": "spot", "img": (sx, sy)}
-        adapt_to(spot_anchor)
         finish_command(now)
 
     screen.fill(BG)
     if last_frame is not None:
         screen.blit(frame_surface(last_frame, dim=(state == "operation")), (view["ox"], view["oy"]))
     else:
-        text_center(f"No image from scene camera {SCENE_CAM_INDEX} - check SCENE_CAM_INDEX", H / 2, font, RED)
+        text_center(f"No picture from the robot page {ROBOT_PAGE}: {scene.status} {scene.error[:80]}" if ROBOT_PAGE else
+                    f"No image from scene camera {SCENE_CAM_INDEX} - check SCENE_CAM_INDEX", H / 2, font, RED)
 
     for i, (tid, pos, need, payload) in enumerate(targets):
         if state in ("object", "destination") and "bbox" in payload:
@@ -1340,13 +1154,25 @@ while True:
             pygame.draw.line(screen, GREEN, a, b, 6)
             pygame.draw.circle(screen, GREEN, b, 40, 5)
         pygame.draw.circle(screen, GREEN, a, 60, 6)
+    if ROBOT_PAGE:
+        tip = (scene.drive.get("real" if ROBOT_TARGET == "real" else "sim") or {}).get("tip_px")
+        if tip:
+            tx, ty = img2scr(*tip)
+            pygame.draw.circle(screen, (255, 80, 200), (tx, ty), 18, 3)
+            pygame.draw.line(screen, (255, 80, 200), (tx - 26, ty), (tx + 26, ty), 2)
+            pygame.draw.line(screen, (255, 80, 200), (tx, ty - 26), (tx, ty + 26), 2)
+            screen.blit(font.render("arm", True, (255, 80, 200)), (tx + 22, ty - 34))
     if show_gaze and gaze:
         pygame.draw.circle(screen, DIM if moving else ORANGE, gaze, 12, 3)
 
     if state == "object":
         banner, col = f"1) Look at an object to choose it ({DWELL_OBJECT_S:.0f} s)", FG
+        if ROBOT_PAGE and time.time() < robot_flash[1]:
+            banner, col = robot_flash[0], RED
     elif state == "operation":
         banner, col = f"2) What should the arm do with the {chosen['name']}? Look at a button", ORANGE
+    elif state == "destination" and ROBOT_PAGE:
+        banner, col = f"2) The arm goes above the {chosen['name']}. Now look at the place B ({DWELL_SPOT_S:.0f} s)", ORANGE
     elif state == "destination":
         banner, col = (f"3) Look at the destination: another object, or a zone "
                         f"(A1-{chr(64 + DEST_ZONES[1])}{DEST_ZONES[0]})" if DEST_MODE == "zones"
@@ -1354,15 +1180,23 @@ while True:
     else:
         banner = f"Sent: {operation[1]} - {chosen['name']}" + (f" -> {dest['name']}" if dest else "")
         col = GREEN
+        if ROBOT_PAGE:
+            res = scene.last_result
+            banner, col = (("Sending to the robot page ...", ORANGE) if res is None else
+                           (res[1], GREEN) if res[0] else (f"Refused: {res[1]}", RED))
     if ev is None:
         banner, col = "No face detected (eye camera)", RED
     text_center(banner, H - 40, big if state == "done" else font, col)
-    table_txt = (f"table: {table_source}" if table_H is not None
-                 else "work area: default left half (A = find black lines, T = click)")
+    if ROBOT_PAGE:
+        table_txt = (f"robot page: {scene.status}" + (f" ({scene.error[:70]})" if scene.error else "")
+                     + f"   |   moves: {'REAL ARM' if ROBOT_TARGET == 'real' else 'simulator'}   |   S = stop")
+    else:
+        table_txt = (f"table: {table_source}" if table_H is not None
+                     else "work area: default left half (A = find black lines, T = click)")
     bg_txt = ("" if DETECTOR != "blobs" else
-              "   |   empty table: " + ("saved (B)" if background["lab"] is not None else "press B"))
+              "   |   empty table: " + ("saved (B)" if background["img"] is not None else "optional, B"))
     status = font.render(f"{len(objects)} objects ({DETECTOR}, {detector.fps:.0f}/s)   |   {table_txt}{bg_txt}",
-                         True, GREEN if table_H is not None else DIM)
+                         True, GREEN if table_H is not None or (ROBOT_PAGE and scene.status == "live") else DIM)
     screen.blit(status, (20, 15))
     pygame.display.flip()
     clock.tick(60)
