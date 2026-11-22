@@ -36,10 +36,10 @@ data class Target(
 )
 
 /**
- * The scene loop of gaze_scene_v2.py on top of the simulator: the overhead camera full screen, the gaze circle,
- * dwell rings, operation buttons and drop zones. Distances and timings are the prototype's, in dp.
+ * The scene loop of gaze_scene_v2.py: the overhead camera full screen, the gaze circle, dwell rings, operation buttons
+ * and drop zones, on the simulator or on the real arm in Poland ([source]). Distances and timings are the prototype's, in dp.
  */
-class SceneController(val station: StationController, val gaze: GazeController, private val scope: CoroutineScope) {
+class SceneController(val source: SceneSource, val gaze: GazeController, private val scope: CoroutineScope) {
     // ---- constants from gaze_scene_v2.py
     companion object {
         const val SIGMA = 200.0
@@ -53,13 +53,10 @@ class SceneController(val station: StationController, val gaze: GazeController, 
         const val STEP_GRACE_S = 0.8
         const val SHOW_DONE_S = 3.0
         val DEST_ZONES = 2 to 3     // columns, rows
-        const val CUBE_HALF_M = 0.02
-        val OPERATIONS = listOf(
-            // The simulator can pick & place and move the gripper; "Bring to me" / "Push towards" need the real arm.
-            Operation("pick_place", "Pick & place", true),
-            Operation("point", "Point at it", false),
-        )
+        const val DWELL_STOP_S = 0.8    // stopping must be quicker than starting
     }
+
+    val operations: List<Operation> get() = source.operations
 
     /** Window size in dp, set by the screen. */
     var screen by mutableStateOf(Size(1440f, 900f))
@@ -68,6 +65,8 @@ class SceneController(val station: StationController, val gaze: GazeController, 
     var stage by mutableStateOf(Stage.Waiting); private set
     var flow by mutableStateOf(Flow.Object); private set
     var chosen by mutableStateOf<Cube?>(null); private set
+    /** The arm was busy with our command during the last tick (to notice when it finishes). */
+    private var wasBusy = false
     var operation by mutableStateOf<Operation?>(null); private set
     var dest by mutableStateOf<Pair<String, Offset>?>(null); private set   // name, camera px
     var showGaze by mutableStateOf(true); private set
@@ -81,47 +80,33 @@ class SceneController(val station: StationController, val gaze: GazeController, 
     private val clock = TimeSource.Monotonic.markNow()
     private fun now() = clock.elapsedNow().inWholeMilliseconds / 1000.0
 
-    data class Cube(val name: String, val color: String, val img: Offset)
-
     // ------------------------------------------------------------------ view (fit_view / img2scr)
     data class View(val s: Float, val ox: Float, val oy: Float, val fw: Float, val fh: Float)
 
     fun view(): View? {
-        val g = station.geometry ?: return null
-        val fw = g.imageWidth.toFloat()
-        val fh = g.imageHeight.toFloat()
+        val (fw, fh) = source.imageSize ?: return null
         val s = min(screen.width / fw, screen.height / fh)
         return View(s, (screen.width - fw * s) / 2, (screen.height - fh * s) / 2, fw, fh)
     }
 
     fun img2scr(p: Offset, v: View) = Offset(v.ox + p.x * v.s, v.oy + p.y * v.s)
 
-    private fun px(w: World): Offset = station.geometry!!.toPixel(w).let { (x, y) -> Offset(x.toFloat(), y.toFloat()) }
-
     // ------------------------------------------------------------------ scene contents
-    fun objects(): List<Cube> = station.cubes.filter { !it.held }.map { Cube("${it.color} block", it.color, px(World(it.x, it.y))) }
+    fun objects(): List<Cube> = source.objects()
 
     /** Bounding box of a cube in camera pixels. */
     fun cubeBox(c: Cube): Rect {
-        val g = station.geometry!!
-        val w = g.toWorld(c.img.x.toDouble(), c.img.y.toDouble())
-        val a = px(World(w.x - CUBE_HALF_M, w.y - CUBE_HALF_M))
-        val b = px(World(w.x + CUBE_HALF_M, w.y + CUBE_HALF_M))
-        return Rect(min(a.x, b.x), min(a.y, b.y), max(a.x, b.x), max(a.y, b.y))
+        if (c.box.isEmpty()) return Rect(c.img - Offset(15f, 15f), c.img + Offset(15f, 15f))
+        return Rect(c.box.minOf { it.x }, c.box.minOf { it.y }, c.box.maxOf { it.x }, c.box.maxOf { it.y })
     }
 
-    /** The work area (the workspace square) as a polygon in camera pixels. */
-    fun workArea(): List<Offset> {
-        val g = station.geometry ?: return emptyList()
-        val side = g.sideCm
-        return listOf(0.0 to side, side to side, side to 0.0, 0.0 to 0.0).map { (cx, cy) -> px(g.blockToWorld("left", cx, cy)) }
-    }
+    /** The work area as a polygon in camera pixels. */
+    fun workArea(): List<Offset> = source.workArea()
 
     data class Zone(val name: String, val poly: List<Offset>, val img: Offset, val occupied: Boolean, val reachable: Boolean)
 
     /** Drop zones on the workspace as seen on screen: rows A (top) .. C (bottom), columns 1..2 left to right. */
     fun zones(): List<Zone> {
-        val g = station.geometry ?: return emptyList()
         val q = workArea()
         if (q.size != 4) return emptyList()
         // order_corners(): top-left, top-right, bottom-right, bottom-left in the camera image
@@ -133,15 +118,13 @@ class SceneController(val station: StationController, val gaze: GazeController, 
             return top + (bottom - top) * v
         }
         val (cols, rows) = DEST_ZONES
-        val reach = station.config?.reach?.blocks?.get("left")?.map { it[0] to it[1] }?.toSet()
         val objs = objects().map { cubeBox(it) }
         val out = mutableListOf<Zone>()
         for (r in 0 until rows) for (c in 0 until cols) {
             val u0 = c.toFloat() / cols; val u1 = (c + 1f) / cols
             val v0 = r.toFloat() / rows; val v1 = (r + 1f) / rows
             val center = at((u0 + u1) / 2, (v0 + v1) / 2)
-            val bp = g.blockAt(g.toWorld(center.x.toDouble(), center.y.toDouble()))
-            val reachable = reach == null || (bp != null && reach.contains((bp.cx / 2).roundToIntSafe() * 2 to (bp.cy / 2).roundToIntSafe() * 2))
+            val reachable = source.reachable(center)
             out += Zone(
                 "zone ${'A' + r}${c + 1}", listOf(at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)), center,
                 occupied = objs.any { it.contains(center) }, reachable = reachable,
@@ -154,18 +137,27 @@ class SceneController(val station: StationController, val gaze: GazeController, 
     fun buttons(): List<Pair<String, Rect>> {
         val (W, H) = screen.width to screen.height
         val bw = W * 0.24f; val bh = H * 0.13f; val gap = H * 0.035f
-        val items = OPERATIONS.map { it.key } + "cancel"
+        val items = operations.map { it.key } + "cancel"
         val total = items.size * bh + (items.size - 1) * gap
         val y0 = (H - total) / 2; val x0 = W - bw - 40
         return items.mapIndexed { i, k -> k to Rect(x0, y0 + i * (bh + gap), x0 + bw, y0 + i * (bh + gap) + bh) }
     }
 
-    fun label(key: String) = OPERATIONS.firstOrNull { it.key == key }?.label ?: "Cancel"
+    fun label(key: String) = operations.firstOrNull { it.key == key }?.label ?: "Cancel"
 
     /** The Cancel box shown while choosing a destination (CANCEL_POS), in dp. */
     fun cancelBox(): Rect = Offset(screen.width - 140, screen.height - 150).let { Rect(it.x - 100, it.y - 40, it.x + 100, it.y + 40) }
 
-    fun targets(v: View): List<Target> = when (flow) {
+    /** The STOP box shown while the arm is moving, in dp: big, and quick to trigger. */
+    fun stopBox(): Rect = Rect(screen.width - 300, screen.height - 230, screen.width - 40, screen.height - 90)
+
+    fun targets(v: View): List<Target> = when {
+        source.busy -> listOf(Target("stop", stopBox().center, DWELL_STOP_S, box = stopBox()))   // only STOP while the arm moves
+        source.notReady != null -> emptyList()
+        else -> selectionTargets(v)
+    }
+
+    private fun selectionTargets(v: View): List<Target> = when (flow) {
         Flow.Object -> objects().map { o ->
             val b = cubeBox(o)
             Target(o.name, img2scr(o.img, v), DWELL_OBJECT_S, Rect(img2scr(b.topLeft, v), img2scr(b.bottomRight, v)))
@@ -220,12 +212,15 @@ class SceneController(val station: StationController, val gaze: GazeController, 
 
     private fun step(now: Double, dt: Double) {
         val v = view() ?: return
-        if (flow == Flow.Done && now >= stateUntil) reset()
+        val busy = source.busy
+        if (flow == Flow.Done && now >= stateUntil && !busy) reset()
+        if (wasBusy && !busy) stateUntil = now + SHOW_DONE_S   // the arm just finished: show the result for a moment
+        wasBusy = busy
         val targets = targets(v)
         val g = gazeDp()
 
         var on: Int? = null
-        if (g != null && !gaze.moving && targets.isNotEmpty() && flow != Flow.Done) {
+        if (g != null && !gaze.moving && targets.isNotEmpty() && (flow != Flow.Done || busy)) {
             val dists = targets.map { distance(g, it) }
             var best = dists.indices.minBy { dists[it] }               // the closest target wins...
             val li = targets.indexOfFirst { it.id == lastOnId }
@@ -246,6 +241,7 @@ class SceneController(val station: StationController, val gaze: GazeController, 
         if ((dwell[t.id] ?: 0.0) < t.need) return
         dwell.clear()
         graceUntil = now + STEP_GRACE_S
+        if (t.id == "stop") return stopArm()
         when (flow) {
             Flow.Object -> {
                 chosen = objects().firstOrNull { it.name == t.id } ?: return
@@ -253,7 +249,7 @@ class SceneController(val station: StationController, val gaze: GazeController, 
             }
             Flow.Operation -> {
                 if (t.id == "cancel") return reset()
-                val op = OPERATIONS.first { it.key == t.id }
+                val op = operations.first { it.key == t.id }
                 operation = op
                 if (op.needsDest) flow = Flow.Destination else finish(now)
             }
@@ -267,18 +263,20 @@ class SceneController(val station: StationController, val gaze: GazeController, 
         }
     }
 
-    /** finish_command(): send it to the simulated arm. */
+    /** finish_command(): send it to the arm (the dwell that got us here is the user's confirmation). */
     private fun finish(now: Double) {
         val c = chosen ?: return
         val o = objects().firstOrNull { it.name == c.name } ?: c   // the object may have moved a little
         chosen = o
-        val src = o.img.x.toDouble() to o.img.y.toDouble()
-        when (operation?.key) {
-            "pick_place" -> dest?.second?.let { station.pickPlace(src, it.x.toDouble() to it.y.toDouble()) }
-            "point" -> station.goToPx(src)
-        }
+        operation?.let { source.execute(it, o, dest?.second) }
         flow = Flow.Done
         stateUntil = now + SHOW_DONE_S
+    }
+
+    /** Stop the arm where it is (the STOP dwell, Esc). */
+    fun stopArm() {
+        source.stop()
+        reset()
     }
 
     fun reset() {
@@ -311,24 +309,23 @@ class SceneController(val station: StationController, val gaze: GazeController, 
 
     // ------------------------------------------------------------------ text
     fun banner(): Pair<String, String> {
-        station.notice?.let { return it.text to "red" }
+        if (source.busy) return (source.progress ?: "The arm is moving") + "   -   look at STOP to stop it" to "orange"
+        source.notice?.let { return it to "red" }
+        source.notReady?.let { return it to "fg" }
         if (!gaze.face) return "No face detected (eye camera)" to "red"
         val c = chosen
         return when (flow) {
             Flow.Object -> "1) Look at an object to choose it (${DWELL_OBJECT_S.toInt()} s)" to "fg"
             Flow.Operation -> "2) What should the arm do with the ${c?.name}? Look at a button" to "orange"
             Flow.Destination -> "3) Look at the destination: a zone (A1-C2)" to "orange"
-            Flow.Done -> "Sent: ${operation?.label} - ${c?.name}${dest?.let { " -> ${it.first}" } ?: ""}" to "green"
+            Flow.Done -> (source.progress ?: "Sent: ${operation?.label} - ${c?.name}${dest?.let { " -> ${it.first}" } ?: ""}") to "green"
         }
     }
 
-    fun statusLine(): String =
-        "${objects().size} objects (simulator)   |   work area: simulator workspace   |   arm: ${station.task.message.ifBlank { station.task.state }}"
+    fun statusLine(): String = "${objects().size} objects (${source.label})   |   ${source.status}"
 }
 
 private fun dist(a: Offset, b: Offset) = hypot((a.x - b.x).toDouble(), (a.y - b.y).toDouble())
-
-private fun Double.roundToIntSafe(): Int = kotlin.math.round(this).toInt()
 
 private fun pointInPolygon(p: Offset, poly: List<Offset>): Boolean {
     var inside = false

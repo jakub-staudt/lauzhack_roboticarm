@@ -14,6 +14,24 @@ running. macOS only lets it see the camera when the app was launched from an app
 from Terminal (`./run.command`) and allow Terminal to use the camera. With the Logitech plugged in the camera numbers
 can change: `GAZE_CAMERA=1 ./run.command`.
 
+## Real arm (the final setup)
+
+One full-screen window: the **live overhead camera from Poland** with the gaze overlay. Look at a block (2 s), at
+**Pick & place** (1.5 s), then at a zone (2 s): that last dwell is the confirmation, and the real SO-101 picks the
+block up and puts it there (open, hover, lower, grip, lift, carry, place, park). While it moves, a red **STOP** box
+appears: look at it for 0.8 s, or press **Esc**, to stop the arm where it is.
+
+```sh
+kmp_app/run_real.command     # from Terminal; Tailscale on; Logitech camera plugged in
+```
+
+It starts the eye tracker on the Logitech camera (`:8830`), the team's camera page server in real-arm mode
+(`lauzkach_eye_robot_control.server --real-agent ...`, `:8820`: overhead camera, rectangle and block detection,
+pick and place through the arm agent next to the arm), then the app with `GAZE_ARM=real`. It needs two files from
+the arm team, which are not in git: the agent token at `~/.gazestation/agent_token` and the arm calibration at
+`robotic_arm/calibration_poses.json`. Someone must watch the arm (the camera page at http://127.0.0.1:8820 also has
+Stop). Code: `RealArmSource.kt` (the camera page API), `SceneSource.kt` (simulator or real arm behind the same scene).
+
 ## Setup
 
 The app itself is Kotlin; the eye tracker and the simulator are Python and run next to it. The app finds the project

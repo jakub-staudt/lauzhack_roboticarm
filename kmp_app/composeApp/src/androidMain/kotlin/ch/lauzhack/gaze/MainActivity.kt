@@ -97,7 +97,7 @@ class MainActivity : ComponentActivity() {
                 it.start()
             }
         }
-        val scene = remember(host) { SceneController(station, gaze, scope).also { it.start() } }
+        val scene = remember(host) { SceneController(SimSource(station), gaze, scope).also { it.start() } }
         val streamer = remember(host) { FrameStreamer(this, "http://$host:8820") }
         DisposableEffect(host, camera) {
             if (camera) streamer.start(this@MainActivity, display?.rotation ?: android.view.Surface.ROTATION_90)

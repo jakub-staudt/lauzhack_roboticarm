@@ -67,7 +67,8 @@ fun SceneScreen(scene: SceneController) {
         // read the state the canvas depends on, so it redraws
         val stage = scene.stage
         val flow = scene.flow
-        val frame = scene.station.frame
+        val frame = scene.source.frame
+        @Suppress("UNUSED_VARIABLE") val busyNow = scene.source.busy
         val gazePt = scene.gaze.point
         val status = scene.gaze.status
         @Suppress("UNUSED_VARIABLE") val dw = scene.dwell.toMap()
@@ -180,7 +181,7 @@ private fun DrawScope.drawScene(
             drawRect(Color.Black.copy(alpha = 0.55f), Offset(v.ox * d, v.oy * d), Size(v.fw * v.s * d, v.fh * v.s * d))
         }
     } else {
-        text.center("No image from the simulator camera (${scene.station.baseUrl})", W / 2, H / 2, 24, RED)
+        text.center(scene.source.notReady ?: "No camera picture yet (${scene.source.baseUrl})", W / 2, H / 2, 24, RED)
     }
 
     if (v != null) {
@@ -191,7 +192,13 @@ private fun DrawScope.drawScene(
                 if (flow == Flow.Destination) continue
                 val b = scene.cubeBox(o)
                 val r = Rect(scene.img2scr(b.topLeft, v), scene.img2scr(b.bottomRight, v))
-                drawRoundRect(cubeColor(o.color), r.topLeft * d, r.size * d, CornerRadius(8 * d), style = Stroke(3 * d))
+                if (o.box.size >= 3) {   // the detector's (turned) square around the block
+                    val pts = o.box.map { scene.img2scr(it, v) * d }
+                    drawPath(Path().apply { moveTo(pts[0].x, pts[0].y); pts.drop(1).forEach { lineTo(it.x, it.y) }; close() },
+                        cubeColor(o.color), style = Stroke(3 * d))
+                } else {
+                    drawRoundRect(cubeColor(o.color), r.topLeft * d, r.size * d, CornerRadius(8 * d), style = Stroke(3 * d))
+                }
                 val t = targets.firstOrNull { it.id == o.name } ?: continue
                 val radius = min(max(40f, min(r.width, r.height) * 0.45f), 80f)
                 ring(t.center, (scene.dwell[t.id] ?: 0.0) / t.need, radius, d)
@@ -241,12 +248,22 @@ private fun DrawScope.drawScene(
         }
     }
 
+    // STOP while the arm is moving: big, red, triggered by a short dwell (or Esc)
+    if (scene.source.busy) {
+        val sb = scene.stopBox()
+        val sf = (scene.dwell["stop"] ?: 0.0) / SceneController.DWELL_STOP_S
+        drawRoundRect(RED.copy(alpha = 0.25f), sb.topLeft * d, sb.size * d, CornerRadius(16 * d))
+        if (sf > 0) drawRoundRect(RED.copy(alpha = 0.6f), sb.topLeft * d, Size(sb.width * min(sf, 1.0).toFloat(), sb.height) * d, CornerRadius(16 * d))
+        drawRoundRect(RED, sb.topLeft * d, sb.size * d, CornerRadius(16 * d), style = Stroke(5 * d))
+        text.center("STOP", sb.center.x, sb.center.y, 56, FG)
+    }
+
     // the gaze circle: orange, grey while the eyes are moving
     if (scene.showGaze && gazePt != null) {
         drawCircle(if (scene.gaze.moving) DIM else ORANGE, 12 * d, gazePt, style = Stroke(3 * d))
     }
 
     val (banner, col) = scene.banner()
-    text.center(banner, W / 2, H - 40, if (flow == Flow.Done) 44 else 24, named(col))
+    text.center(banner, W / 2, H - 40, if (flow == Flow.Done && !scene.source.busy) 44 else 24, named(col))
     text.at(scene.statusLine(), 20f, 15f, 24, GREEN)
 }

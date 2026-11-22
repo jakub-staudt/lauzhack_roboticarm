@@ -29,14 +29,17 @@ fun main(args: Array<String>): Unit = runBlocking<Unit> {
     val (W, H) = 1440 to 900
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val station = StationController(StationApi(url), scope).also { it.start() }
+    // GAZE_ARM=real: drive the real-arm path (the camera page server at GAZE_ARM_URL) instead of the simulator
+    val realUrl = if (System.getenv("GAZE_ARM") == "real") System.getenv("GAZE_ARM_URL") ?: "http://127.0.0.1:8820" else null
+    val station = StationController(StationApi(url), scope).also { if (realUrl == null) it.start() }
+    val source: SceneSource = if (realUrl != null) RealArmSource(realUrl, scope).also { it.start() } else SimSource(station)
     val gaze = GazeController(GazeApi(gazeUrl), scope)
     gaze.mapper = { nx, ny -> Offset((nx * W).toFloat(), (ny * H).toFloat()) }
     gaze.screenSize = { W to H }
     gaze.start()
-    val scene = SceneController(station, gaze, scope).also { it.start() }
-    repeat(150) { if (station.geometry == null || station.frame == null || !gaze.serviceUp) delay(100) }
-    check(station.geometry != null && station.frame != null && gaze.serviceUp) { "No data from $url / $gazeUrl" }
+    val scene = SceneController(source, gaze, scope).also { it.start() }
+    repeat(150) { if (source.notReady != null || source.frame == null || !gaze.serviceUp) delay(100) }
+    check(source.notReady == null && source.frame != null && gaze.serviceUp) { "Not ready: ${source.notReady} / gaze ${gaze.serviceUp}" }
 
     val http = java.net.http.HttpClient.newHttpClient()
     fun look(p: Offset) {
@@ -80,6 +83,14 @@ fun main(args: Array<String>): Unit = runBlocking<Unit> {
     look(scene.img2scr(zone.img, v)); run(1300); shot("6-destination")
     waitFor("done") { scene.flow == Flow.Done }
     run(300); shot("7-sent")
+    if (realUrl != null) {
+        waitFor("arm busy", 5000) { source.busy }
+        run(1500); shot("8-arm-moving")
+        println("while moving: ${source.progress}")
+        waitFor("arm finished", 30000) { !source.busy }
+        run(500); shot("9-arm-done")
+        println("after: progress=${source.progress} notice=${source.notice}")
+    }
     println("Scene run OK: ${scene.chosen?.name} -> ${zone.name}, arm: ${station.task.state}. PNGs in ${out.absolutePath}")
     ui.close()
     // the other window: simulation + controls
