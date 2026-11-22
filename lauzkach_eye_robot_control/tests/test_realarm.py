@@ -27,8 +27,10 @@ LIMITS = {"shoulder_pan": [-105, 65], "shoulder_lift": [-95, 95], "elbow_flex": 
 class FakeDashboard:
     """The few dashboard routes the adapter uses. Targets are reached instantly; every call is recorded."""
 
-    def __init__(self, joints=None, owner=None, gripper=10.0, limits=None, estop=False):
+    def __init__(self, joints=None, owner=None, gripper=10.0, limits=None, estop=False, sag=None):
         self.m = {**(joints or START), "gripper": gripper}
+        self.cmd = dict(self.m)                      # what was commanded; `m` is what is measured (command + sag)
+        self.sag = sag or {}                         # degrees of gravity sag per joint, added to the measurement
         self.owner, self.token, self.estop, self.limits = owner, None, estop, limits or LIMITS
         self.targets, self.calls, self.beats, self.stops = [], [], 0, 0
 
@@ -37,7 +39,7 @@ class FakeDashboard:
         if path == "/api/state":
             return {"connected": True, "torque": True, "emergency_stop": {"latched": self.estop, "generation": 3},
                     "control": {"owner_id": self.owner, "label": "someone"}, "cartesian": {"active": False, "workspace": {"min_tcp_z_m": -0.0024},
-                    "joint_limits": {"effective": self.limits}}, "measured": dict(self.m), "command": dict(self.m)}
+                    "joint_limits": {"effective": self.limits}}, "measured": dict(self.m), "command": dict(self.cmd)}
         if path == "/api/control/claim":
             if self.owner is not None:
                 raise MoveError("Control is held by someone else.")
@@ -52,7 +54,8 @@ class FakeDashboard:
         if path == "/api/target":
             assert body["token"] == "tok" and self.owner == "me"
             self.targets.append((body["joint"], body["value"]))
-            self.m[body["joint"]] = body["value"]
+            self.cmd[body["joint"]] = body["value"]
+            self.m[body["joint"]] = body["value"] + self.sag.get(body["joint"], 0.0)
             return {}
         if path == "/api/stop":
             self.stops += 1
@@ -218,3 +221,33 @@ def test_the_fast_planner_refuses_a_path_that_would_dip_and_the_client_falls_bac
     c.go_to_base(*corner(0), 3.0)
     finish(c)
     assert c.mover.status()["state"] == "done"
+
+
+def test_sag_is_compensated_so_the_measured_tip_lands_near_the_target():
+    """The arm rests lower than commanded under gravity: the last step looks at the measured tip and shifts the command."""
+    sag = {"shoulder_lift": 4.0}                                                     # about 9 mm of tip error
+    dash = FakeDashboard(sag=sag)
+    c = client(dash)
+    x, y = corner(0)
+    c.go_to_base(x, y, 3.0)
+    finish(c)
+    assert c.mover.status()["state"] == "done", c.mover.status()
+    end = tip(dash.m)
+    assert abs(end[2] - (-0.003 + 0.03)) < 0.006 and np.hypot(end[0] - x, end[1] - y) < 0.006
+    uncompensated = FakeDashboard(sag=sag)
+    c2 = client(uncompensated)
+    c2.mover.trim = False
+    c2.go_to_base(x, y, 3.0)
+    finish(c2)
+    assert abs(tip(uncompensated.m)[2] - 0.027) > abs(end[2] - 0.027)               # compensation made it better
+
+
+def test_a_move_is_stopped_if_the_measured_tip_sags_below_the_height_limit():
+    dash = FakeDashboard(sag={"shoulder_lift": 14.0})                                # absurd sag: the tip ends far too low
+    c = client(dash)
+    c.settings.max_step_deg = 3.0
+    c.mover.settings.max_sag_deg = 30.0                                              # do not let the "blocked joint" check catch it first
+    c.go_to_base(*corner(0), 3.0)
+    finish(c)
+    st = c.mover.status()
+    assert st["state"] == "error" and "sags" in st["message"] and dash.stops >= 1 and dash.owner is None

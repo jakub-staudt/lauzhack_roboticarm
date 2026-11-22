@@ -194,11 +194,11 @@ class FakeReal:
     """Stands in for RealArmClient: records what it is asked and can refuse like the real one."""
 
     def __init__(self):
-        self.moves, self.stops, self.refuse = [], 0, None
+        self.moves, self.stops, self.refuse, self.guard = [], 0, None, True
 
     def state(self):
         return {"task": {"state": "idle", "message": ""}, "tip_base": {"x": 0.2, "y": 0.0, "z": 0.03}, "connected": True, "owner": None,
-                "emergency_stop": False, "gripper": 10.0}
+                "emergency_stop": False, "gripper": 10.0, "height_guard": self.guard}
 
     def go_to_base(self, x, y, height_cm):
         if self.refuse:
@@ -234,8 +234,19 @@ def test_every_real_move_needs_an_explicit_confirmation_and_never_runs_closed_lo
         service.go_corner(env(service, clock, "b"), 1, 3.0, closed_loop=True, target="real", confirm_real=True)
     assert err.value.code == "bad_request" and real.moves == []
     with pytest.raises(ApiError) as err:
-        service.go_click(env(service, clock, "c"), 100, 100, 3.0, target="real", confirm_real=True)       # a free click, not a button
-    assert "five buttons" in str(err.value) and real.moves == []
+        service.go_click(env(service, clock, "c"), 100, 100, 3.0, target="real", confirm_real=False)      # a free click needs it too
+    assert err.value.code == "confirm" and real.moves == []
+
+
+def test_a_confirmed_click_on_the_picture_moves_the_real_arm_to_that_point_at_3_cm_and_clicks_outside_are_refused():
+    real = FakeReal()
+    service, sim, clock = real_rig(real)
+    px, py = 100, 100                                                          # the middle of the 200 x 200 px square
+    answer = service.go_click(env(service, clock, "k1"), px, py, 1.0, target="real", confirm_real=True)       # asks for 1 cm: the real arm uses 3
+    assert real.moves and real.moves[0][2] == 3.0 and sim.moves == [] and answer["real"] is True
+    with pytest.raises(ApiError) as err:
+        service.go_click(env(service, clock, "k2"), -500, -500, 3.0, target="real", confirm_real=True)
+    assert err.value.code == "outside" and len(real.moves) == 1
 
 
 def test_a_confirmed_real_corner_move_goes_to_the_real_arm_only():
@@ -264,3 +275,14 @@ def test_stop_halts_both_arms_and_a_silent_page_holds_the_real_one_too():
     service._hold_after_silence()
     assert sim.stops == 2 and real.stops == 2
     assert service.overview()["real"]["available"] and service.overview()["real"]["connected"]
+
+
+def test_free_clicks_on_the_real_arm_are_refused_while_the_agent_lacks_the_height_guard_but_corners_still_work():
+    real = FakeReal()
+    real.guard = False
+    service, sim, clock = real_rig(real)
+    with pytest.raises(ApiError) as err:
+        service.go_click(env(service, clock, "g1"), 100, 100, 3.0, target="real", confirm_real=True)
+    assert err.value.code == "agent_old" and real.moves == []
+    service.go_corner(env(service, clock, "g2"), 0, 3.0, target="real", confirm_real=True)
+    assert len(real.moves) == 1

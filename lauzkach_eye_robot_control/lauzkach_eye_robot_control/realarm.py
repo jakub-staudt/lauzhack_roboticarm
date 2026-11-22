@@ -40,6 +40,7 @@ class RealSettings:
     limit_margin_deg: float = 3.0    # every step must stay this far inside the controller's effective joint limits
     max_step_deg: float = 3.0        # no waypoint moves any joint by more than this: with pause_s that makes about 6 deg/s
     gripper_max: float = 25.0
+    min_measured_height_m: float = 0.02   # the MEASURED tip must stay at least this far above the table during glide/hover
 
 
 class PacedMover(Mover):
@@ -47,25 +48,84 @@ class PacedMover(Mover):
 
     pause_s: float = 0.35
     on_finish = None
+    min_height_m: float | None = None     # the MEASURED tip must stay above this (the arm sags under gravity at full stretch)
+    trim: bool = True                     # after the last step, nudge the target up/over by the measured error (sag compensation)
+    trim_tol_m: float = 0.004
+    _armed: bool = False
 
     def _run(self, token: str, waypoints: list[Waypoint]) -> None:
         try:
+            self._armed = False
             with ThreadPoolExecutor(max_workers=len(ARM)) as pool:
                 for i, wp in enumerate(waypoints):
                     self._check()
                     self._set(step=wp.name, index=i)
                     list(pool.map(lambda j: self.http("POST", "/api/target", {"token": token, "joint": j, "value": wp.joints[j]}), ARM))
                     self._wait_reached(token, wp.joints)
+                    if i < len(waypoints) - 1:
+                        self._guard_height()
                     end = time.monotonic() + self.pause_s
                     while time.monotonic() < end:
                         self._check()
                         time.sleep(0.05)
+                if self.trim and waypoints and waypoints[-1].name == "hover":
+                    self._trim(token, waypoints[-1])
+                self._guard_height(final=True)
             self._set(state="done", step="done", message="Done.")
         except MoveError as exc:
             self._set(state="error", message=str(exc))
         finally:
             if self.on_finish is not None:
                 self.on_finish()
+
+    def _measured(self) -> dict[str, float]:
+        state = self.http("GET", "/api/state", None)
+        return {k: float(v) for k, v in state["measured"].items()}
+
+    def _guard_height(self, final: bool = False) -> None:
+        """Stop if the MEASURED tip is below the height limit. Armed only after the tip has first been seen above it (the arm may
+        START resting on the board), and the final step is checked after the sag trim, not before it."""
+        if self.min_height_m is None:
+            return
+        z = float(self.kin.tcp(self._measured())[2, 3])
+        if z >= self.min_height_m:
+            self._armed = True
+            return
+        if self._armed or final:
+            try:
+                self.http("POST", "/api/stop", {})                 # soft stop: hold where it is
+            except MoveError:
+                pass
+            raise MoveError(f"The tip is only {z * 100:.1f} cm above the origin plane, below the {self.min_height_m * 100:.1f} cm limit "
+                            "(the arm sags at full stretch). Stopped; the arm holds its position.")
+
+    def _trim(self, token: str, last: Waypoint) -> None:
+        """The arm sags under gravity: every joint rests a little away from its command (measured minus command), so the measured tip
+        sits lower than the target. Solve the pose for the TARGET and subtract that per-joint offset from the command, up to twice."""
+        target = np.array(last.xyz, float)
+        for _ in range(2):
+            self._check()
+            state = self.http("GET", "/api/state", None)
+            measured = {k: float(v) for k, v in state["measured"].items()}
+            command = {k: float(v) for k, v in (state.get("command") or state["measured"]).items()}
+            tip = np.array(self.kin.tcp(measured)[:3, 3], float)
+            err = float(np.linalg.norm(target - tip))
+            if err <= self.trim_tol_m or err > 0.03:
+                return
+            rot = np.array(self.kin.tcp(command)[:3, :3])             # the orientation that was commanded
+            sol = self.kin.ik(target, rot, seed=command, tol=self.settings.ik_tol_m)
+            if not sol.ok or sol.rot_err > self.settings.max_rot_err_rad:
+                return
+            offset = {j: measured[j] - command[j] for j in ARM}
+            joints = {j: float(sol.joints[j]) - offset[j] for j in ARM}
+            if any(not self.kin.spec.limits[j][0] <= joints[j] <= self.kin.spec.limits[j][1] for j in ARM):
+                return
+            if max(abs(joints[j] - command[j]) for j in ARM) > 8.0:
+                return
+            self._set(step="trim")
+            for j in ARM:
+                self.http("POST", "/api/target", {"token": token, "joint": j, "value": joints[j]})
+            self._wait_reached(token, joints)
 
 
 def subdivide(start: dict[str, float], waypoints: list[Waypoint], max_step_deg: float) -> list[Waypoint]:
@@ -213,6 +273,7 @@ class RealArmClient:
         click = ClickSettings(above_m=s.glide_m, step_m=s.step_m, gripper_max=s.gripper_max)
         self.mover = PacedMover(http, kin, ImagePlane(Path(tempfile.gettempdir()) / "lauzkach_unused_plane.json"), click)
         self.mover.pause_s = s.pause_s
+        self.mover.min_height_m = z_table + s.min_measured_height_m
         self.mover.on_finish = self._release
         self._token: str | None = None
         self._lock = threading.Lock()
@@ -250,11 +311,13 @@ class RealArmClient:
         name = {"moving": "running", "done": "done", "idle": "idle"}.get(status.get("state"), "error")
         if name == "error" and "ancel" in str(status.get("message", "")):
             name = "stopped"
-        return {"task": {"state": name, "message": status.get("message", "")},
+        return {"task": {"state": name, "message": status.get("message", ""), "step": status.get("step"),
+                         "index": status.get("index"), "total": status.get("total")},
                 "tip_base": {"x": float(tip[0]), "y": float(tip[1]), "z": float(tip[2])},
                 "connected": bool(raw.get("connected")), "torque": bool(raw.get("torque")),
                 "emergency_stop": bool((raw.get("emergency_stop") or {}).get("latched")),
-                "owner": (raw.get("control") or {}).get("label"), "gripper": joints.get("gripper")}
+                "owner": (raw.get("control") or {}).get("label"), "gripper": joints.get("gripper"),
+                "height_guard": self.mover.min_height_m is not None and self.mover.trim}
 
     def go_to_base(self, x: float, y: float, height_cm: float) -> dict:
         s = self.settings

@@ -134,7 +134,8 @@ class DriveService:
         except (RuntimeError, OSError, KeyError) as exc:
             return {"available": True, "connected": False, "error": str(exc)}
         out = {"available": True, "connected": st["connected"], "task": st["task"], "tip_base": st["tip_base"], "owner": st["owner"],
-               "emergency_stop": st["emergency_stop"], "gripper": st["gripper"]}
+               "emergency_stop": st["emergency_stop"], "gripper": st["gripper"],
+               "height_guard": bool(st.get("height_guard"))}
         if self.robot_map is not None and matrix is not None:
             u, v = self.robot_map.xy_to_uv(st["tip_base"]["x"], st["tip_base"]["y"])
             out["tip_px"] = [round(c, 1) for c in uv_to_px(matrix, u, v, self.faces)]
@@ -204,15 +205,20 @@ class DriveService:
         duplicate = self._admit(env)
         if duplicate:
             return duplicate
-        if target == "real":
-            raise ApiError(400, "On the real arm, use the five buttons (four corners and Park) for now.", "bad_request")
+        real = target == "real"
+        if real:
+            self._require_real(closed_loop, confirm_real)
+            height_cm = 3.0                                        # the real arm only hovers, 3 cm above the board
+            if not self.real.state().get("height_guard"):
+                raise ApiError(409, "Clicking arbitrary points needs the newer arm agent (with the measured-height guard and sag "
+                                    "compensation) on the server; the corner buttons still work.", "agent_old")
         matrix = self._matrix()
         u, v = px_to_uv(matrix, px, py, self.faces)
         if not (-INSIDE_MARGIN <= u <= 1 + INSIDE_MARGIN and -INSIDE_MARGIN <= v <= 1 + INSIDE_MARGIN):
             raise ApiError(400, "That click is outside the rectangle.", "outside")
         u, v = min(1.0, max(0.0, u)), min(1.0, max(0.0, v))
         label = f"the clicked point (u {u:.2f}, v {v:.2f})"
-        return self._move_closed(env, u, v, height_cm, label) if closed_loop else self._move(env, u, v, height_cm, label)
+        return self._move_closed(env, u, v, height_cm, label) if closed_loop else self._move(env, u, v, height_cm, label, real)
 
     def go_corner(self, env: dict, index: int, height_cm: float, closed_loop: bool = False, target: str = "sim",
                   confirm_real: bool = False) -> dict:

@@ -247,7 +247,9 @@ function renderReal(locked, busy) {
     b.replaceChildren(document.createTextNode(name)); const small = document.createElement('small'); small.textContent = i < 4 ? '3 cm above' : '3 cm above ' + (labels[0] || 'corner 1').replace(/^1 · /, ''); b.append(small);
     b.disabled = !ok; b.classList.toggle('on-real', isReal);
   });
-  $('tour-next').disabled = $('tour-next').disabled || isReal; $('tour-prev').disabled = $('tour-prev').disabled || isReal; $('go-target').disabled = $('go-target').disabled || isReal;
+  $('tour-next').disabled = $('tour-next').disabled || isReal; $('tour-prev').disabled = $('tour-prev').disabled || isReal;
+  $('go-target').disabled = !(target && locked && (isReal ? real.connected : drive.sim && drive.sim.connected)) || busy;
+  $('go-target').textContent = isReal ? 'Move REAL arm here' : 'Move simulator here'; $('go-target').classList.toggle('on-real', isReal);
 }
 async function goPoint(i) {
   const index = i < 4 ? i : 0, name = i < 4 ? pointLabels()[i] : 'Park (3 cm above the bottom-left corner)';
@@ -300,7 +302,16 @@ const pollDriveSoon = () => setTimeout(async () => { try { drive = await (await 
 const heightCm = () => Number($('height').value);
 
 const closedLoop = () => $('closed-loop').checked && !$('closed-loop').disabled;
-$('go-target').addEventListener('click', () => { if (target) drivePost('/api/drive/go', {px: target.px, py: target.py, height_cm: heightCm(), closed_loop: closedLoop()}, closedLoop() ? 'Move to the target (closed loop)' : 'Move to the target'); });
+$('go-target').addEventListener('click', async () => {
+  if (!target) return;
+  if (realSelected()) {
+    const t = $('target-text').textContent;
+    if (!confirm(`Move the REAL arm to the point you clicked?\n\n${t}\n\nIt will rise, glide at 5 cm and stop 3 cm above the board.\nWatch the arm and keep Stop (Esc) ready.`)) return;
+    await drivePost('/api/drive/go', {px: target.px, py: target.py, height_cm: 3, closed_loop: false, target: 'real', confirm_real: true}, 'REAL arm: move to the clicked point');
+    return;
+  }
+  drivePost('/api/drive/go', {px: target.px, py: target.py, height_cm: heightCm(), closed_loop: closedLoop()}, closedLoop() ? 'Move to the target (closed loop)' : 'Move to the target');
+});
 async function tourTo(index) {
   const r = await drivePost('/api/drive/corner', {index, height_cm: heightCm(), closed_loop: closedLoop()}, `Move to corner ${index + 1}${closedLoop() ? ' (closed loop)' : ''}`);
   if (r) { tourIndex = index; const c = drive.corners[index]; $('tour-text').textContent = `Corner ${index + 1} of 4, ${c.name} (u ${c.u}, v ${c.v}): the arm goes to x ${(c.x * 100).toFixed(1)}, y ${(c.y * 100).toFixed(1)} cm from its base.`; }
@@ -365,3 +376,33 @@ poll();
   box.addEventListener('change', apply);
   fetch('/api/drive').then(r => r.json()).then(d => { url = d.sim_page || ''; if (!url) off.textContent = 'No simulator address configured.'; apply(); }).catch(() => { off.hidden = false; });
 })();
+
+
+// The big progress bar at the top: what the selected arm is doing right now.
+const PHASES = {rise: 'Lifting the gripper', glide: 'Travelling over the board', hover: 'Lowering to 3 cm above the board', up: 'Lifting', down: 'Lowering',
+                trim: 'Fine-tuning the height (gravity sag)', done: 'Arrived'};
+function renderProgress() {
+  if (!drive || !drive.enabled) return;
+  const real = realSelected(), arm = real ? (drive.real || {}) : (drive.sim || {}), task = arm.task || {};
+  const bar = $('progress'), name = real ? 'REAL arm' : 'Simulator';
+  $('pg-arm').textContent = name; $('pg-arm').classList.toggle('real', real);
+  let tone = 'idle', state = 'Ready', detail = 'Waiting for a command.', pct = 0;
+  if (!arm.connected && !(arm.task)) { state = 'Not connected'; detail = real ? 'The real arm is not answering.' : 'The simulator is not answering.'; tone = 'bad'; }
+  else if (real && arm.emergency_stop) { state = 'EMERGENCY STOP latched'; detail = 'Reset it in the manual page before moving.'; tone = 'bad'; }
+  else if (task.state === 'planning') { state = 'Planning the path'; detail = 'Working out the joint angles…'; tone = 'busy'; pct = 2; }
+  else if (task.state === 'running') {
+    const total = Number(task.total) || 0, index = Number(real ? (task.index ?? 0) + 1 : task.step) || 0;
+    pct = total ? Math.min(99, Math.round(100 * index / total)) : 5;
+    state = 'Moving'; tone = 'busy';
+    detail = (real ? (PHASES[task.step] || task.step || '') : (task.message || '')) + (total ? `  (step ${Math.min(index, total)} of ${total})` : '');
+  } else if (task.state === 'done') { state = 'Arrived'; detail = real ? 'Move finished; control released.' : (task.message || 'Move finished.'); tone = 'ok'; pct = 100; }
+  else if (task.state === 'stopped') { state = 'Stopped'; detail = 'The arm holds where it is. You can send the next move.'; tone = 'bad'; pct = 0; }
+  else if (task.state === 'error') { state = 'Stopped'; detail = task.message || 'The move could not be completed.'; tone = 'bad'; }
+  else if (real && arm.owner) { state = 'Busy'; detail = `Controlled by ${arm.owner}.`; tone = 'busy'; }
+  $('pg-state').textContent = state; $('pg-detail').textContent = detail; $('pg-pct').textContent = `${pct}%`;
+  $('pg-fill').style.width = `${pct}%`; bar.dataset.tone = tone;
+  const t = arm.tip_base; $('pg-tip').textContent = t ? `Tip (the arm's own estimate): x ${(t.x * 100).toFixed(1)}, y ${(t.y * 100).toFixed(1)}, height ${(t.z * 100).toFixed(1)} cm` + (real && arm.gripper != null ? ` · gripper ${Math.round(arm.gripper)}` : '') : '';
+}
+const _renderDrive = renderDrive;
+renderDrive = function () { _renderDrive(); renderProgress(); };
+renderProgress();

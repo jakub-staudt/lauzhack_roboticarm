@@ -11,6 +11,16 @@
   <h1>Rectangle detector</h1>
   <div id="conn" class="chip" data-tone="idle">Connecting…</div>
 </header>
+<div id="progress" class="progress" data-tone="idle" role="status" aria-live="polite">
+  <div class="progress-top">
+    <span id="pg-arm" class="pg-arm">Simulator</span>
+    <b id="pg-state" class="pg-state">Ready</b>
+    <span id="pg-detail" class="pg-detail">Waiting for a command.</span>
+    <span id="pg-pct" class="pg-pct">0%</span>
+  </div>
+  <div class="pg-track"><div id="pg-fill" class="pg-fill"></div></div>
+  <div id="pg-tip" class="pg-tip"></div>
+</div>
 
 <main>
   <section class="stage-col">
