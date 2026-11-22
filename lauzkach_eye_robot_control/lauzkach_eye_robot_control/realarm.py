@@ -15,6 +15,7 @@ Nothing here is run by the tests against a real arm.
 
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import time
@@ -67,6 +68,7 @@ class GraspSettings:
     lower_max_sag_deg: float = 4.5        # a joint further than this behind its command = something resists: stop
 
     pick_offset_override: float | None = None   # aim this far behind the block's centre along the jaw axis (a profile's value); None: computed
+    align: str = "offset"                       # "jaw_middle": aim so the MIDDLE between the open jaws is over the block's centre (computed from the model)
     profile: str = "current"
 
     @property
@@ -87,6 +89,22 @@ class GraspSettings:
     @property
     def grasp_tip_m(self) -> float:
         return self.grasp_tip_above_table_m
+
+
+def jaw_middle_offset(kin, gripper: float) -> float:
+    """Distance [m] from the tool point to the middle between the two fingertips along the jaw-closing axis, for a gripper opening (from the
+    arm's model). Aiming the tool point this far BEHIND a block's centre puts the middle of the open jaws over the block's centre."""
+    import mujoco
+    data = mujoco.MjData(kin.model)
+    joints = {"shoulder_pan": 0.0, "shoulder_lift": -23.3, "elbow_flex": 46.4, "wrist_flex": 3.3, "wrist_roll": 0.0, "gripper": float(gripper)}
+    kin.write_qpos(data.qpos, kin.to_q(joints))
+    mujoco.mj_forward(kin.model, data)
+    pose = kin.tcp(joints)
+    zs = []
+    for tip in kin.spec.fingertips:
+        gid = next(i for i in range(kin.model.ngeom) if (mujoco.mj_id2name(kin.model, mujoco.mjtObj.mjOBJ_GEOM, i) or "").endswith(tip))
+        zs.append(float((np.array(pose[:3, :3]).T @ (data.geom_xpos[gid] - np.array(pose[:3, 3])))[2]))
+    return float(sum(zs) / len(zs))
 
 
 class PacedMover(Mover):
@@ -120,12 +138,14 @@ class PacedMover(Mover):
     def beat(self, token: str) -> None:
         self.http("POST", "/api/control/heartbeat", {"token": token})
 
-    def run_waypoints(self, token: str, waypoints: list[Waypoint], phase: str = "", trim_last: bool = False) -> None:
+    def run_waypoints(self, token: str, waypoints: list[Waypoint], phase: str = "", trim_last: bool = False, stop_event=None) -> bool:
         """Execute waypoints in order (blocking), with the height guard and sag handling of a normal move. `trim_last`: after the last
         waypoint, look at the MEASURED tip and push the command until the tip really is there (gravity sag at full reach)."""
         self._armed = False
         with ThreadPoolExecutor(max_workers=len(ARM)) as pool:
             for i, wp in enumerate(waypoints):
+                if stop_event is not None and stop_event.is_set():           # an outside check says: that is far enough
+                    return True
                 self._check()
                 self._set(step=phase or wp.name, index=i, total=len(waypoints))
                 list(pool.map(lambda j: self.http("POST", "/api/target", {"token": token, "joint": j, "value": wp.joints[j]}), ARM))
@@ -139,6 +159,7 @@ class PacedMover(Mover):
         if trim_last and waypoints:
             self._trim(token, waypoints[-1], tries=4, tol=0.004, limit=0.05)
             self._guard_height(final=True)
+        return stop_event is not None and stop_event.is_set()
 
     def _run(self, token: str, waypoints: list[Waypoint]) -> None:
         try:
@@ -270,15 +291,16 @@ def _interpolate(kin, a: dict[str, float], b: dict[str, float], n: int) -> tuple
 
 
 def plan_hover_fast(kin, settings: ClickSettings, start: dict[str, float], target_xy: tuple[float, float], z_table: float,
-                    z_floor: float | None, hover_m: float, max_step_deg: float = 3.0) -> list[Waypoint]:
+                    z_floor: float | None, hover_m: float, max_step_deg: float = 3.0, orient_from: dict[str, float] | None = None) -> list[Waypoint]:
     """Same route as `plan_hover` (rise, glide at the glide height, straight down) but with THREE inverse-kinematics solves instead
     of one per centimetre: IK only at the corners of the route, joint-space interpolation between them, and a cheap forward-kinematics
     check that the tip never dips below the allowed height on the way. Raises MoveError if any check fails (the caller then falls
     back to the slow, line-by-line planner)."""
     z_above, z_hover = z_table + settings.above_m, z_table + hover_m
-    pose0 = kin.tcp(start)
-    tip0, R0 = np.array(pose0[:3, 3], float), np.array(pose0[:3, :3])
-    th0 = math.atan2(tip0[1], tip0[0])
+    tip0 = np.array(kin.tcp(start)[:3, 3], float)
+    pose_o = kin.tcp(orient_from or start)                            # the gripper orientation to keep (maybe a re-tilted copy of the pose)
+    R0 = np.array(pose_o[:3, :3])
+    th0 = math.atan2(pose_o[1, 3], pose_o[0, 3])
     tx, ty = target_xy
     low_ok = max(z_hover - 0.005, (z_floor + 0.001) if z_floor is not None else -1.0)          # nothing below this, ever
 
@@ -351,7 +373,7 @@ class RealArmClient:
     """Same small interface as the simulator client (`state`, `go_to_base`, `stop`), so the drive service can use either."""
 
     def __init__(self, http, kin, calibration_xy: list[tuple[float, float]], z_table: float, settings: RealSettings | None = None,
-                 label: str = "Camera drive", grasp_settings: "GraspSettings | None" = None) -> None:
+                 label: str = "Camera drive", grasp_settings: "GraspSettings | None" = None, park_path: str | None = None) -> None:
         self.http, self.kin, self.z_table = http, kin, z_table
         self.settings = settings or RealSettings()
         s = self.settings
@@ -366,6 +388,16 @@ class RealArmClient:
         self._token: str | None = None
         self._lock = threading.Lock()
         self.gs = grasp_settings or GraspSettings()
+        self._enough = threading.Event()                          # set by the camera watcher: the gripper is low enough, stop lowering
+        self.park_path = park_path
+        self.park: dict | None = None
+        if park_path and Path(park_path).exists():
+            try:
+                self.park = json.loads(Path(park_path).read_text())
+            except (OSError, ValueError):
+                self.park = None
+        if self.gs.align == "jaw_middle":
+            self.gs.pick_offset_override = jaw_middle_offset(kin, self.gs.open_value)
         self.grasp: dict = {"stage": "idle", "pending": None}
 
     # ------------------------------------------------------------------ the lease, held only for the length of a move
@@ -468,7 +500,16 @@ class RealArmClient:
     def _reconcile(self, raw: dict | None) -> None:
         """If the jaws are visibly holding a block (stalled between the hold and open values, the command ahead of the reading) while the
         stage says otherwise, e.g. the controller dropped control during the close, trust what the arm shows."""
-        if not raw or self.mover.busy() or self.grasp["stage"] not in ("idle", "open", "hover", "lower"):
+        if not raw or self.mover.busy():
+            return
+        try:
+            gripper = float(raw["measured"]["gripper"])
+        except (KeyError, TypeError, ValueError):
+            return
+        if self.grasp["stage"] in ("lifted", "closed", "miss", "carried") and gripper > self.gs.open_value - 12:
+            self.grasp.update(stage="open", pending=None)                      # the jaws are open again: the block was released
+            return
+        if self.grasp["stage"] not in ("idle", "open", "hover", "lower"):
             return
         try:
             m = float(raw["measured"]["gripper"])
@@ -476,16 +517,25 @@ class RealArmClient:
         except (KeyError, TypeError, ValueError):
             return
         gs = self.gs
-        if gs.hold_min <= m <= gs.open_value - 12 and m - c >= 1.0:
+        if gs.hold_min <= m <= gs.open_value - 12 and m - c >= 0.5:
             self.grasp.update(stage="closed", hold=m, last=f"The jaws are holding a block (they read {m:.1f}).")
+            try:                                                           # held and already high above the grasp height: it is lifted
+                joints = {k: float(v) for k, v in raw["measured"].items()}
+                rise = float(self.kin.tcp(joints)[2, 3]) - self.z_table - gs.grasp_tip_m
+                if rise > 0.025:
+                    self.grasp.update(stage="lifted", lifted_dz=rise, last=f"The jaws hold a block {rise * 100:.1f} cm above the grasp height.")
+            except (KeyError, TypeError, ValueError):
+                pass
 
     def _grasp_state(self, raw: dict | None = None) -> dict:
         self._settle_stage()
         self._reconcile(raw)
         g = self.grasp
         nxt = {"idle": ["open"], "open": ["hover", "open"], "hover": ["lower", "open"], "lower": ["close", "open"],
-               "closed": ["lift", "open"], "lifted": ["putback"], "miss": ["open"]}.get(g["stage"], ["open"])
-        return {"stage": g["stage"], "profile": self.gs.profile, "next": nxt, "block": g.get("block"), "hold_value": g.get("hold"), "last": g.get("last", "")}
+               "closed": ["lift", "open"], "lifted": ["carry", "putback"], "carried": ["place"], "miss": ["open"]}.get(g["stage"], ["open"])
+        extra = ["set_park"] + (["park"] if self.park and g["stage"] not in ("closed", "lifted", "carried") else [])
+        park = None if not self.park else {"joints": {k: round(v, 1) for k, v in self.park["joints"].items()}, "tip_cm": self.park.get("tip_cm")}
+        return {"stage": g["stage"], "profile": self.gs.profile, "next": nxt, "extra": extra, "park": park, "visual": g.get("visual"), "block": g.get("block"), "hold_value": g.get("hold"), "last": g.get("last", "")}
 
     def _settle_stage(self) -> None:
         """A stage counts only when its job finished successfully; an error leaves the previous stage in place."""
@@ -500,14 +550,25 @@ class RealArmClient:
             self.grasp["last"] = status.get("message", "")
         self.grasp["pending"] = None
 
-    def grasp_action(self, action: str, x: float | None = None, y: float | None = None) -> dict:
+    def grasp_action(self, action: str, x: float | None = None, y: float | None = None, yaw: float | None = None,
+                     park_after: bool = False, obstacles: list | None = None) -> dict:
+        if action == "lower_stop":                                          # from the camera watcher: legal only while lowering
+            if not self.mover.busy():
+                raise MoveError("The arm is not lowering.")
+            self._enough.set()
+            return {"state": "stopping"}
         self._settle_stage()
         if self.mover.busy():
             raise MoveError("The arm is still moving. Wait for it to finish.")
         state = self.http("GET", "/api/state", None)
         g = self._grasp_state(state)
         stage = g["stage"]
-        if action not in g["next"]:
+        if action == "set_park":                                           # no motion: remember where the arm is now
+            return self._save_park(state)
+        if action == "park" and "park" not in g["extra"]:
+            raise MoveError("Release the block first (put it back) before parking." if stage in ("closed", "lifted", "carried") else
+                            "No park position is saved yet: move the arm there and press 'Save current arm pose as park'.")
+        if action not in g["next"] and action not in g["extra"]:
             raise MoveError(f"Not now: after '{stage}' the next steps are {', '.join(g['next'])}.")
         measured, floor = self._preflight(state, allow_open_gripper=True)
         owner = (state.get("control") or {}).get("owner_id")
@@ -521,14 +582,22 @@ class RealArmClient:
                 raise MoveError("Click the block on the picture first.")
             if not (self.box[0] <= x <= self.box[1] and self.box[2] <= y <= self.box[3]):
                 raise MoveError("That point is outside the area the arm was calibrated on.")
-            return self._grasp_hover(state, measured, floor, float(x), float(y))
+            return self._grasp_hover(state, measured, floor, float(x), float(y), yaw)
+        if action == "park":
+            return self._go_park(state, measured, floor)
         if action == "lower":
             return self._grasp_lower(state, measured, floor)
         if action == "close":
             return self._launch_job("close gripper", self._close_gripper, None)
         if action == "lift":
-            return self._grasp_lift(measured, floor)
-        return self._grasp_putback(measured, floor)
+            return self._grasp_lift(state, measured, floor)
+        if action == "carry":
+            if x is None or y is None:
+                raise MoveError("Choose the destination first.")
+            return self._grasp_carry(state, measured, floor, float(x), float(y), obstacles or [])
+        if action == "place":
+            return self._grasp_place(state, measured, floor, park_after)
+        return self._grasp_putback(state, measured, floor, park_after)
 
     def _launch_job(self, label: str, fn, pending) -> dict:
         token = self._claim()
@@ -568,15 +637,31 @@ class RealArmClient:
         raise MoveError(f"The gripper did not reach {value:.0f} (it reads {measured:.0f}).")
 
     def _close_gripper(self, token: str) -> None:
-        """Close slowly; the moment the jaws touch (they lag the command and stop moving) stop pushing: command just below the reading."""
+        """Close slowly; the moment the jaws touch (they lag the command and stop moving) stop pushing: command just below the reading.
+        The controller sometimes drops control right after the jaws stall ("Arm fault; holding the arm"): if the jaws are holding a block
+        at that moment, that is a successful grip, not an error."""
         gs = self.gs
+
+        def beat() -> bool:                                                   # False = control was dropped but the jaws hold a block
+            try:
+                self.mover.beat(token)
+                return True
+            except MoveError:
+                measured, _ = self._gripper_state()
+                if gs.hold_min <= measured <= gs.open_value - 15:               # after the fault the controller resets its command to the reading
+                    self.grasp["pending"] = ("closed", {"hold": measured})
+                    self.mover._set(message=f"Holding a block: the jaws stalled at {measured:.1f}. (The controller released control; the grip holds.)")
+                    return False
+                raise
+
         measured, command = self._gripper_state()
         target, last, still_since = command, measured, None
         while True:
             self.mover._check()
             target = max(gs.close_floor, target - gs.close_step)
             self.http("POST", "/api/target", {"token": token, "joint": "gripper", "value": target})
-            self.mover.beat(token)
+            if not beat():
+                return
             time.sleep(0.2)
             measured, _ = self._gripper_state()
             moving = last - measured > gs.stall_eps
@@ -587,7 +672,8 @@ class RealArmClient:
                 break
         for _ in range(3):                                                    # let it settle, then read the stall value
             time.sleep(0.2)
-            self.mover.beat(token)
+            if not beat():
+                return
             measured, _ = self._gripper_state()
         if measured >= gs.hold_min:
             self.http("POST", "/api/target", {"token": token, "joint": "gripper", "value": measured - gs.squeeze})
@@ -617,34 +703,110 @@ class RealArmClient:
             ax, ay = x - self.gs.pick_offset_m * cx / norm, y - self.gs.pick_offset_m * cy / norm
         return ax, ay, pitch
 
-    def _grasp_hover(self, state: dict, measured: dict[str, float], floor, x: float, y: float) -> dict:
+    def _choose_roll(self, tilted: dict[str, float], x: float, y: float, yaw: float, limits: dict) -> float | None:
+        """The wrist roll that puts the jaw-closing axis parallel to a pair of the block's faces (yaw is one face direction, in the arm's
+        frame; the cube is the same turned by 90 degrees). Scans the allowed roll range using the arm's own kinematics, keeps 5 degrees from
+        the limits and picks the solution nearest the current roll. None if the range has no solution."""
+        lo, hi = (limits.get("wrist_roll") or (-150.0, 150.0))
+        best = None
+        for r in np.arange(lo + 5.0, hi - 5.0 + 1e-9, 1.0):
+            joints = {**tilted, "wrist_roll": float(r)}
+            pose = self.kin.tcp(joints)
+            _, closing = self.kin.tool_axes(joints)
+            dth = math.atan2(y, x) - math.atan2(float(pose[1, 3]), float(pose[0, 3]))           # the hover turns the gripper with the shoulder
+            az = math.atan2(float(closing[1]), float(closing[0])) + dth
+            err = math.degrees((az - yaw + math.pi / 4) % (math.pi / 2) - math.pi / 4)             # distance to the nearest face direction, -45..45
+            if abs(err) <= 2.0:
+                cost = abs(r - tilted["wrist_roll"])
+                if best is None or cost < best[0]:
+                    best = (cost, float(r))
+        return None if best is None else best[1]
+
+    def _grasp_hover(self, state: dict, measured: dict[str, float], floor, x: float, y: float, yaw: float | None = None) -> dict:
         gs = self.gs
         if measured["gripper"] < gs.open_value - 12:
             raise MoveError("Open the gripper first.")
-        ax, ay, pitch = self._tool_aim(measured, x, y)
-        if pitch < gs.min_pitch_deg:
-            raise MoveError(f"The gripper points {pitch:.0f} degrees below horizontal; it must be at least {gs.min_pitch_deg:.0f} "
-                            "(nearly straight down). Tilt it down in the manual page first.")
-        click = ClickSettings(above_m=gs.glide_above_table_m, step_m=self.settings.step_m, gripper_max=1e9)
+        _, _, pitch0 = self._tool_aim(measured, x, y)
         limits = (state.get("cartesian") or {}).get("joint_limits", {}).get("effective") or {}
-        try:
+        click = ClickSettings(above_m=gs.glide_above_table_m, step_m=self.settings.step_m, gripper_max=1e9)
+        wf = measured.get("wrist_flex", 0.0)
+        wanted = [p for p in (pitch0,) if gs.min_pitch_deg <= p <= 78.0] + [74.0, 70.0, 78.0, 66.0]   # keep a good tilt, else choose one
+        last_error: MoveError | None = None
+        for pitch in wanted:
+            tilted = {**measured, "wrist_flex": wf + (pitch - pitch0)}          # same jaw direction, only the tilt changes
+            if yaw is not None:                                                 # turn the wrist so the jaws close across the block's faces
+                roll = self._choose_roll(tilted, x, y, yaw, limits)
+                if roll is None:
+                    last_error = MoveError("the wrist cannot turn the jaws parallel to the block's faces within its roll limits")
+                    continue
+                tilted = {**tilted, "wrist_roll": roll}
+            ax, ay, _ = self._tool_aim(tilted, x, y)
             try:
-                wps = plan_hover_fast(self.kin, click, measured, (ax, ay), self.z_table, floor, gs.hover_above_table_m, self.settings.max_step_deg)
-            except MoveError:
-                wps = plan_hover(self.kin, click, measured, (ax, ay), self.z_table, floor, gs.hover_above_table_m, self.settings.max_step_deg)
-            self._check_limits(wps, limits)
-        except MoveError as exc:
-            wf, top = measured.get("wrist_flex", 0.0), (limits.get("wrist_flex") or (0.0, 95.0))[1]
-            if wf > top - 12:
-                raise MoveError(f"The wrist is bent to {wf:.0f} of {top:.0f} degrees (the gripper points {pitch:.0f} degrees below horizontal, nearly "
-                                "straight down), so the arm has no room to rise and move. Tilt the gripper back about 15 degrees, to about 70 to 75 "
-                                "degrees below horizontal, and try again.") from exc
-            raise
+                try:
+                    wps = plan_hover_fast(self.kin, click, measured, (ax, ay), self.z_table, floor, gs.hover_above_table_m, self.settings.max_step_deg, orient_from=tilted)
+                except MoveError:
+                    wps = plan_hover(self.kin, click, tilted, (ax, ay), self.z_table, floor, gs.hover_above_table_m, self.settings.max_step_deg)
+                self._check_limits(wps, limits)
+                break
+            except MoveError as exc:
+                last_error = exc
+        else:
+            raise MoveError(f"The arm cannot hover over that block with the gripper pointing about 66 to 78 degrees below horizontal "
+                            f"({last_error}). Try a block nearer the base.")
+        notes = []
+        if abs(pitch - pitch0) > 1.0:
+            notes.append(f"tilting the gripper from {pitch0:.0f} to {pitch:.0f} degrees below horizontal")
+        if yaw is not None:
+            notes.append(f"turning the wrist to {tilted['wrist_roll']:.0f} degrees so the jaws close across the block's faces")
+        if notes:
+            self.mover._set(message="Hovering, " + " and ".join(notes) + ".")
         return self._launch_job("hover over the block", lambda t: self.mover.run_waypoints(t, wps, "hover over the block"),
                                 ("hover", {"block": (x, y), "aim": (ax, ay)}))
 
     def _vertical_waypoints(self, measured: dict[str, float], dz: float, floor) -> list[Waypoint]:
         return _vertical(self.kin, ClickSettings(gripper_max=1e9), measured, dz, floor, 0.01)
+
+    def _nudge_tilted(self, joints: dict[str, float], dz: float, floor, delta_deg: float) -> Waypoint:
+        """One step straight up while the gripper tilts back by `delta_deg` (the wrist unbends, which gives the arm room to rise)."""
+        if delta_deg == 0.0:
+            return plan_nudge(self.kin, ClickSettings(gripper_max=1e9), joints, dz, floor)[0]
+        rot = np.array(self.kin.tcp({**joints, "wrist_flex": joints["wrist_flex"] - delta_deg})[:3, :3])
+        tip = np.array(self.kin.tcp(joints)[:3, 3], float)
+        goal = tip + np.array([0.0, 0.0, dz])
+        sol = self.kin.ik(goal, rot, seed=joints, tol=ClickSettings().ik_tol_m)
+        if not sol.ok or sol.rot_err > ClickSettings().max_rot_err_rad:
+            raise MoveError("no tilted solution")
+        new = {j: float(sol.joints[j]) for j in ARM}
+        if any(not self.kin.spec.limits[j][0] <= new[j] <= self.kin.spec.limits[j][1] for j in ARM) or max(abs(new[j] - joints[j]) for j in ARM) > 35.0:
+            raise MoveError("no tilted solution")
+        return Waypoint("up", [float(c) for c in goal], new)
+
+    def _vertical_max(self, measured: dict[str, float], dz_max: float, floor, limits: dict | None, min_dz: float) -> tuple[list[Waypoint], float]:
+        """Straight up in 1 cm steps, as far as the arm can go (up to dz_max) without leaving the joint limits (3 degrees of margin).
+        Raises if it cannot reach min_dz."""
+        out: list[Waypoint] = []
+        joints, total, click = dict(measured), 0.0, ClickSettings(gripper_max=1e9)
+        while total < dz_max - 0.001:
+            step = min(0.01, dz_max - total)
+            wp = None
+            for delta in (0.0, 2.0, 4.0, 6.0, 8.0, 10.0):                    # keep the tilt if possible, else tilt back a little as it rises
+                try:
+                    cand = self._nudge_tilted(joints, step, floor, delta)
+                except MoveError:
+                    continue
+                if limits and any(not limits[j][0] + 3.0 <= cand.joints[j] <= limits[j][1] - 3.0 for j in ARM):
+                    continue
+                wp = cand
+                break
+            if wp is None:
+                break
+            out.append(wp)
+            joints = {**joints, **wp.joints}
+            total += step
+        if total < min_dz - 1e-9:
+            raise MoveError(f"At this reach the arm can lift the block only {total * 100:.0f} cm before the wrist or elbow reaches its limit "
+                            f"(it needs at least {min_dz * 100:.0f} cm). Grasp a block nearer the base.")
+        return out, total
 
     def _grasp_lower(self, state: dict, measured: dict[str, float], floor) -> dict:
         gs = self.gs
@@ -652,54 +814,223 @@ class RealArmClient:
         dz = (self.z_table + gs.grasp_tip_m) - tip_z
         if dz > -0.004:
             raise MoveError("The gripper is already at grasp height.")
-        wps = self._vertical_waypoints(measured, dz, floor)
+        wps = _vertical(self.kin, ClickSettings(gripper_max=1e9), measured, dz, floor, 0.005)       # 5 mm steps: the camera can stop it early
         self._check_limits(wps, (state.get("cartesian") or {}).get("joint_limits", {}).get("effective"))
 
         def job(token: str) -> None:
             saved = (self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s)
-            self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = self.z_table + gs.lower_min_height_m, gs.lower_max_sag_deg, 0.4
+            self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = self.z_table + gs.lower_min_height_m, gs.lower_max_sag_deg, 0.3
+            self._enough.clear()
             try:
-                self.mover.run_waypoints(token, wps, "lowering to grasp height", trim_last=True)
+                early = self.mover.run_waypoints(token, wps, "lowering to grasp height", trim_last=True, stop_event=self._enough)
             finally:
                 self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = saved
+            now = self.http("GET", "/api/state", None)
+            z = float(self.kin.tcp({k: float(v) for k, v in now["measured"].items()})[2, 3]) - self.z_table
+            self.grasp["visual"] = "edge reached" if early else "not confirmed by the camera"
+            self.mover._set(message=(f"Lowered enough: the camera saw the block's edge reach the bottom of its picture (tool {z * 100:.1f} cm above the table)."
+                                     if early else f"Lowered to grasp height ({z * 100:.1f} cm above the table); the camera did not confirm it."))
         return self._launch_job("lower to grasp height", job, ("lower", {}))
 
-    def _grasp_lift(self, measured: dict[str, float], floor) -> dict:
+    def _grasp_lift(self, state: dict, measured: dict[str, float], floor) -> dict:
         gs = self.gs
         if measured["gripper"] < gs.hold_min - 4:
             raise MoveError("The gripper is not holding a block (it is nearly closed).")
-        wps = self._vertical_waypoints(measured, gs.lift_m, floor)
+        limits = (state.get("cartesian") or {}).get("joint_limits", {}).get("effective")
+        wps, planned = self._vertical_max(measured, gs.lift_m, floor, limits, 0.025)
 
         def job(token: str) -> None:
             z0 = float(self.kin.tcp(measured)[2, 3])
             self.mover.run_waypoints(token, wps, "lifting the block", trim_last=True)
             now = self.http("GET", "/api/state", None)
             rose = float(self.kin.tcp({k: float(v) for k, v in now["measured"].items()})[2, 3]) - z0
-            if rose < 0.6 * gs.lift_m:
-                raise MoveError(f"The arm did not lift: the tip rose only {rose * 100:.1f} cm of {gs.lift_m * 100:.0f} cm (the arm sags at this reach). "
+            if rose < 0.6 * planned:
+                raise MoveError(f"The arm did not lift: the tip rose only {rose * 100:.1f} cm of {planned * 100:.0f} cm (the arm sags at this reach). "
                                 "The block is still gripped on the table; try Lift again or Put back and release.")
             held, _ = self._gripper_state()
             if held < gs.hold_min - 6:
                 self.grasp.update(stage="miss", pending=None)
                 raise MoveError(f"The block was lost during the lift (the jaws read {held:.0f}).")
-        return self._launch_job("lift the block", job, ("lifted", {}))
+            path = [{j: float(measured[j]) for j in ARM}] + [dict(wp.joints) for wp in wps]       # remembered so Put back can retrace it exactly
+            self.grasp["pending"] = ("lifted", {"lifted_dz": rose, "lift_path": path})
+            self.mover._set(message=f"Lifted the block {rose * 100:.1f} cm.")
+        return self._launch_job("lift the block", job, None)
 
-    def _grasp_putback(self, measured: dict[str, float], floor) -> dict:
+    # ---- the park pose
+    def _save_park(self, state: dict) -> dict:
+        m = {k: float(v) for k, v in state["measured"].items()}
+        tip = [round(float(c) * 100, 1) for c in self.kin.tcp(m)[:3, 3]]
+        self.park = {"about": "The park pose (measured joints, degrees): where the arm waits so it does not hide the overhead camera.",
+                     "joints": {j: round(m[j], 2) for j in ARM}, "tip_cm": tip, "saved": time.strftime("%Y-%m-%d %H:%M:%S")}
+        if self.park_path:
+            Path(self.park_path).write_text(json.dumps(self.park, indent=1))
+        self.mover._set(state="done", step="done", message=f"Park position saved: tip at x {tip[0]}, y {tip[1]}, height {tip[2]} cm.")
+        return {"state": "done", "message": self.mover.status()["message"], "park": self.park}
+
+    def _plan_park(self, start: dict[str, float], floor, limits: dict | None, rise: bool = True) -> list[Waypoint]:
+        """Rise straight up first if low (so the gripper clears the blocks), then a joint-space glide to the saved joints in <= 3 degree steps,
+        checked by sampling that the tool never dips below where it is or where the park pose is (minus 1.5 cm) nor below the controller's floor."""
+        park = {j: float(self.park["joints"][j]) for j in ARM}
+        if limits and any(not limits[j][0] + 2.0 <= park[j] <= limits[j][1] - 2.0 for j in ARM):
+            raise MoveError("The saved park pose is outside the arm's joint limits: save it again.")
+        wps: list[Waypoint] = []
+        here = dict(start)
+        z_safe = self.z_table + 0.07
+        if rise and float(self.kin.tcp(here)[2, 3]) < z_safe - 0.005:
+            up, _ = self._vertical_max(here, z_safe - float(self.kin.tcp(here)[2, 3]), floor, limits, 0.0)
+            wps += up
+            if up:
+                here = {**here, **up[-1].joints}
+        n = max(1, math.ceil(max(abs(park[j] - here[j]) for j in ARM) / 3.0))
+        path = [{j: here[j] + (park[j] - here[j]) * i / n for j in ARM} for i in range(1, n + 1)]
+        floor_z = min(float(self.kin.tcp(here)[2, 3]), float(self.kin.tcp({**here, **park})[2, 3])) - 0.015
+        if floor is not None:
+            floor_z = max(floor_z, floor + 0.001)
+        lowest = min(float(self.kin.tcp({**here, **p})[2, 3]) for p in path)
+        if lowest < floor_z:
+            raise MoveError(f"The way to the park position would dip the tool to {lowest * 100:.1f} cm (limit {floor_z * 100:.1f} cm): refused.")
+        wps += [Waypoint("park", [0.0, 0.0, 0.0], p) for p in path]
+        return wps
+
+    def _go_park(self, state: dict, measured: dict[str, float], floor) -> dict:
+        limits = (state.get("cartesian") or {}).get("joint_limits", {}).get("effective")
+        wps = self._plan_park(measured, floor, limits)
+        return self._launch_job("go to the park position", lambda t: self.mover.run_waypoints(t, wps, "going to the park position"), ("open" if self.grasp["stage"] == "idle" else self.grasp["stage"], {}))
+
+    def _grasp_putback(self, state: dict, measured: dict[str, float], floor, park_after: bool = False) -> dict:
         gs = self.gs
-        down = self._vertical_waypoints(measured, -gs.lift_m, floor)
+        dz = float(self.grasp.get("lifted_dz") or gs.lift_m)
+        path = self.grasp.get("lift_path")
+        if path and len(path) > 1:                                          # retrace the lift (it tilted the gripper back as it rose)
+            down = [Waypoint("down", [float(c) for c in self.kin.tcp({**measured, **j})[:3, 3]], dict(j)) for j in reversed(path[:-1])]
+        else:
+            down = self._vertical_waypoints(measured, -dz, floor)
+        return self._place_job(state, measured, floor, down, dz, park_after, "put the block back", "putting the block back")
+
+    def _grasp_place(self, state: dict, measured: dict[str, float], floor, park_after: bool = False) -> dict:
+        """At the destination: lower the carried block straight down to the grasp height, release it, rise clear and (if asked) go to the park pose."""
+        gs = self.gs
+        if measured["gripper"] < gs.hold_min - 4:
+            raise MoveError("The gripper is not holding a block.")
+        dz = (self.z_table + gs.grasp_tip_m) - float(self.kin.tcp(measured)[2, 3])
+        down = _vertical(self.kin, ClickSettings(gripper_max=1e9), measured, dz, floor, 0.005) if dz < -0.004 else []
+        self._check_limits(down, (state.get("cartesian") or {}).get("joint_limits", {}).get("effective")) if down else None
+        return self._place_job(state, measured, floor, down, abs(dz) if dz < 0 else gs.lift_m, park_after, "place the block", "placing the block")
+
+    def _place_job(self, state: dict, measured: dict[str, float], floor, down: list[Waypoint], dz: float, park_after: bool, label: str, phase: str) -> dict:
+        gs = self.gs
+        # Work out the rise-clear path NOW, before taking control: planning inside the job starved the heartbeat (1.5 s lease) and the
+        # controller refused the first rising step right after the release.
+        end = {**measured, **down[-1].joints} if down else dict(measured)
+        limits = (state.get("cartesian") or {}).get("joint_limits", {}).get("effective")
+        clear, _ = self._vertical_max(end, dz + 0.02, floor, limits, 0.0)
+        park_wps: list[Waypoint] | None = None
+        park_note = ""
+        if park_after and self.park:
+            try:
+                park_wps = self._plan_park({**end, **(clear[-1].joints if clear else {})}, floor, limits, rise=False)
+            except MoveError as exc:
+                park_note = f" (not parked: {exc})"
 
         def job(token: str) -> None:
-            saved = (self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s)
-            self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = self.z_table + gs.lower_min_height_m, gs.lower_max_sag_deg, 0.4
-            try:
-                self.mover.run_waypoints(token, down, "putting the block back", trim_last=True)
-            finally:
-                self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = saved
+            if down:
+                saved = (self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s)
+                self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = self.z_table + gs.lower_min_height_m, gs.lower_max_sag_deg, 0.4
+                try:
+                    self.mover.run_waypoints(token, down, phase, trim_last=True)
+                finally:
+                    self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = saved
             self._gripper_to(token, gs.open_value)
-            now = self.http("GET", "/api/state", None)
-            joints = {k: float(v) for k, v in now["measured"].items()}
-            self.mover.run_waypoints(token, self._vertical_waypoints(joints, gs.lift_m + 0.02, floor), "rising clear")
-        return self._launch_job("put the block back", job, ("hover", {}))
+            self.grasp["pending"] = ("hover", {})                              # the block is down and released from here on
+            self.mover._set(message="The block is put down and released." + park_note)
+            if clear:
+                try:
+                    self.mover.run_waypoints(token, clear, "rising clear")
+                except MoveError as exc:                                      # not worth failing the step: the block is already released
+                    self.mover._set(message=f"The block is put down and released (the arm did not rise clear: {exc})")
+                    return
+            if park_wps:
+                try:
+                    self.mover.run_waypoints(token, park_wps, "going to the park position")
+                    self.mover._set(message="The block is put down and released; the arm is at the park position.")
+                except MoveError as exc:
+                    self.mover._set(message=f"The block is put down and released (the arm did not reach the park position: {exc})")
+        return self._launch_job(label, job, ("hover", {}))
+
+    def _grasp_carry(self, state: dict, measured: dict[str, float], floor, x: float, y: float, obstacles: list) -> dict:
+        """Carry the gripped block, at the height it was lifted to, in a straight line to above the destination (x, y: where the block's centre
+        should end up). The block keeps the gripper's tilt and the jaws their direction. Refuses if the path or the destination is too close to
+        another block (centre to centre under 65 mm: a 49 mm block plus clearance)."""
+        gs = self.gs
+        if measured["gripper"] < gs.hold_min - 4:
+            raise MoveError("The gripper is not holding a block.")
+        if not (self.box[0] <= x <= self.box[1] and self.box[2] <= y <= self.box[3]):
+            raise MoveError("The destination is outside the area the arm was calibrated on.")
+        _, closing = self.kin.tool_axes(measured)
+        unit = np.array(closing[:2]) / max(float(np.hypot(*closing[:2])), 1e-9)
+        tip = np.array(self.kin.tcp(measured)[:2, 3], float)
+        here = tip + self._jaw_mid() * unit                                   # where the held block's centre is now
+        dest = np.array([x, y], float)
+        obs = [np.array([float(ox), float(oy)]) for ox, oy in obstacles]
+        for o in obs:
+            if float(np.linalg.norm(o - dest)) < 0.065:
+                raise MoveError(f"The destination is only {float(np.linalg.norm(o - dest)) * 100:.1f} cm from another block (needs 6.5 cm): choose a freer spot.")
+
+        def clear(a_: np.ndarray, b_: np.ndarray) -> bool:
+            seg = b_ - a_
+            for o in obs:
+                t = 0.0 if float(seg @ seg) < 1e-12 else max(0.0, min(1.0, float((o - a_) @ seg) / float(seg @ seg)))
+                if float(np.linalg.norm(o - (a_ + t * seg))) < 0.065:
+                    return False
+            return True
+
+        height = float(self.kin.tcp(measured)[2, 3]) - self.z_table
+        click = ClickSettings(above_m=height, step_m=self.settings.step_m, gripper_max=1e9)
+        limits = (state.get("cartesian") or {}).get("joint_limits", {}).get("effective")
+        wide = (self.box[0] - 0.03, self.box[1] + 0.03, self.box[2] - 0.03, self.box[3] + 0.03)
+
+        def leg(start: dict[str, float], target: np.ndarray) -> list[Waypoint]:
+            ax, ay, _ = self._tool_aim(start, float(target[0]), float(target[1]))
+            try:
+                wps = plan_hover_fast(self.kin, click, start, (ax, ay), self.z_table, floor, height, self.settings.max_step_deg)
+            except MoveError:
+                wps = plan_hover(self.kin, click, start, (ax, ay), self.z_table, floor, height, self.settings.max_step_deg)
+            self._check_limits(wps, limits)
+            return wps
+
+        routes: list[list[np.ndarray]] = [[dest]] if clear(here, dest) else []
+        if not routes:                                                          # a straight line would hit another block: try a detour
+            mid, seg = (here + dest) / 2, dest - here
+            perp = np.array([-seg[1], seg[0]]) / max(float(np.linalg.norm(seg)), 1e-9)
+            for off in (0.07, 0.09, 0.11, 0.13, 0.15, 0.17):
+                for sgn in (1.0, -1.0):
+                    via = mid + sgn * off * perp
+                    if wide[0] <= via[0] <= wide[1] and wide[2] <= via[1] <= wide[3] and clear(here, via) and clear(via, dest):
+                        routes.append([via, dest])
+        last_exc: MoveError | None = None
+        for route in routes:
+            try:
+                wps, start = [], dict(measured)
+                for target in route:
+                    part = leg(start, target)
+                    wps += part
+                    start = {**start, **part[-1].joints}
+                break
+            except MoveError as exc:
+                last_exc = exc
+        else:
+            raise MoveError("The straight way to the destination passes too close to another block (needs 6.5 cm) and no detour around it is reachable: "
+                            "choose another destination or move that block first." + (f" ({last_exc})" if last_exc else ""))
+        detour = len(route) > 1
+
+        def job(token: str) -> None:
+            if detour:
+                self.mover._set(message="Carrying the block around another block.")
+            self.mover.run_waypoints(token, wps, "carrying the block", trim_last=True)
+        return self._launch_job("carry the block", job, ("carried", {"dest": (x, y)}))
+
+    def _jaw_mid(self) -> float:
+        return self.gs.pick_offset_m
 
     def stop(self) -> dict:
         """A soft stop: the arm holds where it is. Nothing latches."""

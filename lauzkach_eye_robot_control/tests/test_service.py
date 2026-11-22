@@ -1,3 +1,4 @@
+import time
 """The drive service with a fake simulator: clicks and corners become moves, and lag cannot make a move run late, twice or after Stop."""
 
 import numpy as np
@@ -326,3 +327,148 @@ def test_the_agents_refusal_of_a_grasp_step_reaches_the_page_as_a_reason():
     with pytest.raises(ApiError) as err:
         service.grasp(env(service, clock, "s6"), "lower", confirm_real=True)
     assert err.value.code == "real_refused" and "Not now" in str(err.value)
+
+
+# ---------------------------------------------------------------------------------------------- pick and place (the whole sequence)
+class ScriptedReal(FakeReal):
+    """Behaves like the agent: every grasp action runs for a moment and then finishes; the stage advances."""
+
+    NEXT = {"open": "open", "hover": "hover", "lower": "lower", "close": "closed", "lift": "lifted", "carry": "carried", "place": "hover"}
+
+    def __init__(self, fail_at=None, miss=False):
+        super().__init__()
+        self.calls, self.fail_at, self.miss, self.stage, self.task, self.busy_until = [], fail_at, miss, "idle", "idle", 0.0
+
+    def grasp_action(self, action, x=None, y=None, yaw=None, park_after=False, obstacles=None):
+        if action == "lower_stop":
+            return {"state": "stopping"}
+        self.calls.append((action, x, y, yaw, park_after, obstacles))
+        self.busy_until = time.time() + 0.05
+        self.pending = action
+        return {"state": "planning"}
+
+    def state(self):
+        st = super().state()
+        if self.calls and time.time() >= self.busy_until and getattr(self, "pending", None):
+            action, self.pending = self.pending, None
+            if action == self.fail_at:
+                self.task = "error"
+            else:
+                self.task = "done"
+                self.stage = "miss" if (action == "close" and self.miss) else self.NEXT[action]
+        elif getattr(self, "pending", None):
+            self.task = "moving"
+        st["task"] = {"state": self.task, "message": f"{self.calls[-1][0]} done" if self.calls else ""}
+        st["grasp"] = {"stage": self.stage}
+        return st
+
+
+def wait_for(runner, secs=10.0):
+    end = time.time() + secs
+    while runner.busy() and time.time() < end:
+        time.sleep(0.02)
+    assert not runner.busy()
+
+
+def pp_rig(real):
+    service, sim, clock = real_rig(real)
+    service.wrist_fetch = None
+    return service, clock
+
+
+PICK = {"px": 60, "py": 150, "colour": "blue", "box": [[50, 140], [70, 140], [70, 160], [50, 160]]}
+DEST = {"px": 150, "py": 60}
+
+
+def test_pick_and_place_runs_all_the_steps_in_order_with_the_right_places_and_finishes():
+    real = ScriptedReal()
+    service, clock = pp_rig(real)
+    service.pick_place(env(service, clock, "p1"), PICK, DEST, others=[[100, 190]], confirm_real=True, park_after=True)
+    from lauzkach_eye_robot_control.pickplace import STEPS
+    service.runner.timeout_s, service.runner.poll_s = 5.0, 0.02
+    wait_for(service.runner)
+    assert [c[0] for c in real.calls] == [s[0] for s in STEPS]
+    assert service.runner.status["state"] == "done"
+    hover, carry, place = real.calls[1], real.calls[5], real.calls[6]
+    assert hover[1] is not None and hover[3] is not None                              # the block's place and rotation went to the hover
+    assert carry[1] is not None and not carry[5]                                       # the destination only: no block-distance checks once the block is held
+    assert place[4] is True
+
+
+def test_pick_and_place_needs_confirmation_and_a_free_destination_and_the_real_arm():
+    real = ScriptedReal()
+    service, clock = pp_rig(real)
+    with pytest.raises(ApiError) as err:
+        service.pick_place(env(service, clock, "p2"), PICK, DEST, confirm_real=False)
+    assert err.value.code == "confirm" and real.calls == []
+    with pytest.raises(ApiError, match="on top of another block"):
+        service.pick_place(env(service, clock, "p3"), PICK, DEST, others=[[152, 62]], confirm_real=True)
+    with pytest.raises(ApiError, match="too close to the starting block"):
+        service.pick_place(env(service, clock, "p4"), PICK, {"px": 62, "py": 150}, confirm_real=True)
+    with pytest.raises(ApiError) as err:
+        service.pick_place(env(service, clock, "p5"), PICK, {"px": -900, "py": 0}, confirm_real=True)
+    assert err.value.code == "outside" and real.calls == []
+    service2, _sim2, clock2 = real_rig(None)
+    with pytest.raises(ApiError) as err:
+        service2.pick_place(env(service2, clock2, "p6"), PICK, DEST, confirm_real=True)
+    assert err.value.code == "no_real"
+
+
+def test_a_failed_or_missed_step_stops_the_sequence_and_says_which_one_and_why():
+    for kw, step_name in (({"fail_at": "lower"}, "lower"), ({"miss": True}, "close")):
+        real = ScriptedReal(**kw)
+        service, clock = pp_rig(real)
+        service.pick_place(env(service, clock, "f" + step_name), PICK, DEST, confirm_real=True)
+        service.runner.timeout_s, service.runner.poll_s = 5.0, 0.02
+        wait_for(service.runner)
+        st = service.runner.status
+        assert st["state"] == "error" and "arm holds" in st["message"], st
+        assert real.calls[-1][0] == step_name                                            # nothing after the failed step was started
+
+
+def test_stop_cancels_the_sequence_before_the_next_step():
+    real = ScriptedReal()
+    service, clock = pp_rig(real)
+    service.pick_place(env(service, clock, "s1"), PICK, DEST, confirm_real=True)
+    service.runner.timeout_s, service.runner.poll_s = 5.0, 0.02
+    time.sleep(0.1)
+    service.stop()
+    wait_for(service.runner)
+    assert service.runner.status["state"] == "stopped" and len(real.calls) < 7
+
+
+def test_a_second_try_while_the_arm_holds_a_block_carries_on_from_the_carry_step_without_a_starting_block():
+    real = ScriptedReal()
+    real.stage = "lifted"
+    service, clock = pp_rig(real)
+    service.pick_place(env(service, clock, "r1"), None, DEST, others=[[100, 190]], confirm_real=True)
+    service.runner.timeout_s, service.runner.poll_s = 5.0, 0.02
+    wait_for(service.runner)
+    assert [c[0] for c in real.calls] == ["carry", "place"]
+    assert service.runner.status["state"] == "done"
+
+
+def test_without_a_held_block_a_starting_block_is_required():
+    real = ScriptedReal()
+    service, clock = pp_rig(real)
+    with pytest.raises(ApiError, match="Choose the starting block"):
+        service.pick_place(env(service, clock, "r2"), None, DEST, confirm_real=True)
+
+
+def test_when_the_arm_holds_a_block_no_other_block_can_stop_the_carry():
+    real = ScriptedReal()
+    real.stage = "lifted"
+    service, clock = pp_rig(real)
+    service.pick_place(env(service, clock, "r9"), None, DEST, others=[[150, 62], [100, 100]], confirm_real=True)       # even a block at the destination
+    service.runner.timeout_s, service.runner.poll_s = 5.0, 0.02
+    wait_for(service.runner)
+    assert [c[0] for c in real.calls] == ["carry", "place"] and not real.calls[0][5]
+
+
+def test_the_picked_block_itself_is_never_taken_for_another_block():
+    real = ScriptedReal()
+    service, clock = pp_rig(real)
+    service.pick_place(env(service, clock, "q1"), PICK, DEST, others=[[61, 151]], confirm_real=True)                  # its own centre, a pixel off
+    service.runner.timeout_s, service.runner.poll_s = 5.0, 0.02
+    wait_for(service.runner)
+    assert service.runner.status["state"] == "done"

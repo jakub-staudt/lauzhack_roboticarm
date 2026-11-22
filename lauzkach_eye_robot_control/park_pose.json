@@ -1,0 +1,15 @@
+{
+ "about": "The park pose: where the arm waits so it does not hide the overhead camera. Recorded from the measured joints (degrees). Saved 2026-11-22 from the manual page pose; re-record with the 'Save current arm pose as park' button.",
+ "joints": {
+  "shoulder_pan": -30.498046875,
+  "shoulder_lift": -2.900390625,
+  "elbow_flex": 11.689453125,
+  "wrist_flex": 75.76171875,
+  "wrist_roll": -90.703125
+ },
+ "tip_cm": [
+  21.8,
+  9.2,
+  5.6
+ ]
+}

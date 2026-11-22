@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 import cv2
 import numpy as np
 
+from lauzkach_eye_robot_control.blocks import detect_blocks
 from lauzkach_eye_robot_control.camera import FileSource, FrameSource, MjpegSource, decode
 from lauzkach_eye_robot_control.detect import detect, rectify
 from lauzkach_eye_robot_control.closedloop import SimMover, SimTruthObserver
@@ -111,12 +112,19 @@ class Analyzer:
         if shown is not None:
             crop = cv2.imencode(".jpg", rectify(image, shown, 360), [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()
         with self.lock:
+            matrix = self.cal.get("px_to_cm") if self.cal["state"] == "locked" else None
+        try:
+            blocks = detect_blocks(image, matrix) if matrix is not None else []
+        except Exception as exc:  # noqa: BLE001 - the picture still works without the block markers
+            print(f"block detection error: {type(exc).__name__}: {exc}", flush=True)
+            blocks = []
+        with self.lock:
             self.frames[seq] = (jpeg, crop)
             while len(self.frames) > KEEP_FRAMES:
                 self.frames.popitem(last=False)
             self.result = {"seq": seq, "received": received, "detect_ms": round(elapsed, 1), "detection": found,
                            "polygon_shown": None if shown is None else [[round(float(x), 1), round(float(y), 1)] for x, y in shown],
-                           "locked": locked is not None, "has_crop": crop is not None}
+                           "locked": locked is not None, "has_crop": crop is not None, "blocks": blocks}
 
     # ---------------------------------------------------------------- calibration (called with self.lock held)
     def recalibrate(self) -> None:
@@ -312,7 +320,11 @@ class Handler(BaseHTTPRequestHandler):
                                                bool(body.get("closed_loop", False)), str(body.get("target", "sim")), bool(body.get("confirm_real", False)))
             elif path == "/api/drive/grasp":
                 result = self.service.grasp(envelope, str(body["action"]), None if body.get("px") is None else float(body["px"]),
-                                            None if body.get("py") is None else float(body["py"]), bool(body.get("confirm_real", False)))
+                                            None if body.get("py") is None else float(body["py"]), bool(body.get("confirm_real", False)),
+                                            body.get("box"), bool(body.get("park_after", False)), body.get("colour"))
+            elif path == "/api/drive/pickplace":
+                result = self.service.pick_place(envelope, body["pick"], body["dest"], body.get("others"), bool(body.get("confirm_real", False)),
+                                                 bool(body.get("park_after", True)))
             elif path == "/api/drive/corner":
                 result = self.service.go_corner(envelope, int(body["index"]), float(body.get("height_cm", 3.0)), bool(body.get("closed_loop", False)),
                                                 str(body.get("target", "sim")), bool(body.get("confirm_real", False)))
@@ -336,6 +348,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--camera", default=DEFAULT_CAMERA, help="MJPEG stream of the overhead camera (read-only GET)")
+    ap.add_argument("--wrist-snapshot", default="http://100.85.56.14:8780/cameras/wrist.jpg", help="one gripper-camera picture (read-only GET); used to watch the block while lowering")
     ap.add_argument("--wrist-camera", default=DEFAULT_WRIST, help="MJPEG stream of the gripper (first-person) camera; empty to turn it off")
     ap.add_argument("--image", help="use this picture instead of the camera")
     ap.add_argument("--host", default="127.0.0.1")
@@ -387,8 +400,13 @@ def main() -> None:
         print("*** REAL ARM ENABLED: the five buttons can move the physical arm (hover >= 3 cm, slow, each move confirmed). Keep Stop (Esc) ready. ***")
     Handler.wrist_url = args.wrist_camera
     Handler.sim_page = args.simulator.rstrip("/") + "/"
+    def wrist_fetch():
+        with urllib.request.urlopen(args.wrist_snapshot, timeout=3) as r:
+            return decode(r.read())
+
     Handler.service = DriveService(Handler.analyzer.locked_matrix, robot_map, sim_client, faces=args.robot_faces,
-                                   deadman_s=args.deadman_seconds, closed_loop=closed_loop, sim_calibration_error=demo_error, real=real)
+                                   deadman_s=args.deadman_seconds, closed_loop=closed_loop, sim_calibration_error=demo_error, real=real,
+                                   wrist_fetch=wrist_fetch if args.wrist_snapshot else None)
     Handler.service.start()
     Handler.analyzer.start()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
