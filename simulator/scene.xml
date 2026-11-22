@@ -3,7 +3,7 @@
 
   <default>
     <default class="gaze/block">
-      <geom type="box" size="0.01 0.01 0.01" mass="0.008"
+      <geom type="box" size="0.0245 0.0245 0.0245" mass="0.05"
             condim="4" friction="1 0.02 0.002"/>
     </default>
     <default class="gaze/guide">
@@ -35,15 +35,15 @@
     <geom name="gaze/grid_right" class="gaze/guide"
           pos="-0.14 -0.2 0.75015" size="0.1008 0.0008 0.00005"/>
 
-    <body name="red_block" pos="-0.11 0.05 0.76">
+    <body name="red_block" pos="-0.11 0.05 0.7745">
       <freejoint/>
       <geom name="red_block" class="gaze/block" rgba="0.78 0.033 0.055 1"/>
     </body>
-    <body name="blue_block" pos="-0.11 0.15 0.76">
+    <body name="blue_block" pos="-0.16 0.15 0.7745">
       <freejoint/>
       <geom name="blue_block" class="gaze/block" rgba="0.04 0.25 0.78 1"/>
     </body>
-    <body name="yellow_block" pos="-0.08 0.10 0.76">
+    <body name="yellow_block" pos="-0.18 0.10 0.7745">
       <freejoint/>
       <geom name="yellow_block" class="gaze/block" rgba="0.88 0.61 0.035 1"/>
     </body>

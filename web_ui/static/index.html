@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arm Control</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Arm control</h1>
+  <div id="status" class="pill">connecting…</div>
+  <button id="softstop" class="softstop" title="Halts the arm where it is and cancels the current move. NOT the emergency stop: nothing latches, and you can click Take control and carry on remotely.">Stop motion (Esc)</button>
+  <button id="estop" class="danger" title="The controller's emergency stop: it latches. Use Stop motion for a normal stop.">EMERGENCY STOP</button>
+  <button id="estop-reset" hidden>Reset stop</button>
+</header>
+
+<main>
+  <section id="camera">
+    <div class="stage">
+      <img id="overhead" alt="Overhead camera" title="Click to calibrate or move">
+      <canvas id="marks"></canvas>
+    </div>
+    <div id="cam-note">Overhead camera · <label>frame rate <select id="cam-fps"><option value="2">2 fps</option><option value="10">10 fps</option><option value="15">15 fps</option><option value="20">20 fps</option></select></label> <label><input type="checkbox" id="wrist-on"> wrist camera</label></div>
+  </section>
+
+  <aside>
+    <div class="card">
+      <div class="insets">
+        <figure class="inset"><figcaption>Wrist</figcaption><img id="wrist" alt="Wrist camera"></figure>
+        <figure class="inset"><figcaption>3D arm view</figcaption><canvas id="pose" role="img" aria-label="Read-only diagram of the measured arm pose"></canvas></figure>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Control</h2>
+      <button id="claim" class="primary">Take control</button>
+      <button id="release" hidden>Release control</button>
+      <label>Speed
+        <select id="profile">
+          <option value="slow" selected>slow</option>
+          <option value="medium">medium</option>
+          <option value="fast">fast</option>
+        </select>
+      </label>
+      <label title="Use when the tip is just below the table-height floor. Allows only small moves (3 degrees tilt, 2 mm drift) for W/S/R/F.">
+        <input type="checkbox" id="recovery"> Recovery mode (re-enter above the floor)
+      </label>
+      <div class="roll">Move the tip:
+        <button id="nudge-up" title="Move the tip straight up by the chosen step">▲ Up</button>
+        <button id="nudge-down" title="Move the tip straight down by the chosen step (stops at the controller's floor)">▼ Down</button>
+        <select id="nudge-step" title="Step size"><option value="2">2 mm</option><option value="5" selected>5 mm</option><option value="10">10 mm</option><option value="20">20 mm</option></select>
+      </div>
+      <div class="roll">Wrist roll nudge:
+        <button id="roll-minus" title="Roll toward negative (left). Do not use near -114.">−10°</button>
+        <button id="roll-plus" title="Roll toward positive (right). Use this to back off the -114 end stop.">+10°</button>
+      </div>
+      <div id="notice" role="status"></div>
+    </div>
+
+    <div class="card" id="click-card">
+      <h2>Click to move</h2>
+      <div class="seg">
+        <label><input type="radio" name="mode" value="calibrate" checked> Calibrate</label>
+        <label><input type="radio" name="mode" value="move"> Move</label>
+      </div>
+      <p class="hint" id="mode-hint"></p>
+      <label><input type="checkbox" id="allow-move"> Allow the arm to move when I click</label>
+      <div id="mvp-status" class="mvp-status"></div>
+      <ol id="cal-list"></ol>
+      <button id="cal-undo">Undo last</button> <button id="cal-clear">Clear all</button> <button id="mv-cancel">Cancel move</button>
+    </div>
+
+    <div class="card">
+      <h2>Keyboard <span id="kbd-state" class="pill small">needs control</span></h2>
+      <p class="hint">Hold a key to move, release to stop. One key at a time.</p>
+      <table class="keys">
+        <tr><td><kbd>W</kbd>/<kbd>S</kbd></td><td>forward / back</td></tr>
+        <tr><td><kbd>A</kbd>/<kbd>D</kbd></td><td>left / right (pan)</td></tr>
+        <tr><td><kbd>R</kbd>/<kbd>F</kbd></td><td>up / down</td></tr>
+        <tr><td><kbd>I</kbd>/<kbd>K</kbd></td><td>wrist tilt up / down</td></tr>
+        <tr><td><kbd>J</kbd>/<kbd>L</kbd></td><td>wrist roll left / right</td></tr>
+        <tr><td><kbd>Q</kbd>/<kbd>E</kbd></td><td>gripper open / close</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Stop motion (soft: nothing latches; the emergency stop is the red button)</td></tr>
+      </table>
+      <div class="pad" id="pad">
+        <button data-dir="forward">▲ W</button>
+        <button data-dir="left">◀ A</button><button data-dir="back">▼ S</button><button data-dir="right">▶ D</button>
+        <button data-dir="up">up R</button><button data-dir="down">down F</button>
+        <button data-dir="tilt_up">tilt I</button><button data-dir="tilt_down">tilt K</button>
+        <button data-dir="roll_left">roll J</button><button data-dir="roll_right">roll L</button>
+        <button data-dir="open">open Q</button><button data-dir="close">close E</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Joints</h2>
+      <table id="joints"></table>
+      <div id="extra" class="hint"></div>
+    </div>
+  </aside>
+</main>
+<script src="pose-preview.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

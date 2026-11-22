@@ -1,0 +1,59 @@
+:root {
+  --bg: #f4f5f7; --card: #fff; --text: #1b1f24; --muted: #5f6b7a; --line: #d9dde3;
+  --accent: #1f6feb; --danger: #c62828; --ok: #1a7f37; --warn: #9a6700;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #14171b; --card: #1d2228; --text: #e6e9ee; --muted: #9aa5b1; --line: #313842;
+          --accent: #4c8dff; --danger: #ef5350; --ok: #3fb950; --warn: #d29922; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
+header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--card); }
+h1 { font-size: 18px; margin: 0; flex: 1; }
+h2 { font-size: 14px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; padding: 16px; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+#overhead { width: 100%; background: #000; border-radius: 8px; display: block; aspect-ratio: 4 / 3; object-fit: contain; }
+#cam-note { color: var(--muted); font-size: 13px; margin-top: 6px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+button { font: inherit; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 700; }
+button[aria-pressed="true"], .pad button.active { outline: 3px solid var(--accent); }
+label { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+select { font: inherit; padding: 4px 8px; }
+.pill { padding: 3px 10px; border-radius: 99px; background: var(--line); font-size: 13px; }
+.pill.small { font-size: 11px; padding: 1px 8px; font-weight: 400; }
+.pill.ok { background: var(--ok); color: #fff; } .pill.bad { background: var(--danger); color: #fff; } .pill.warn { background: var(--warn); color: #fff; }
+.hint { color: var(--muted); font-size: 13px; margin: 4px 0; }
+#notice { margin-top: 8px; min-height: 1.4em; color: var(--danger); font-size: 13px; }
+kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font: 12px monospace; }
+table { width: 100%; border-collapse: collapse; }
+.keys td { padding: 2px 4px; font-size: 13px; }
+#joints td { padding: 2px 4px; font-variant-numeric: tabular-nums; }
+#joints td:last-child { text-align: right; }
+.pad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 8px; }
+.pad button { padding: 8px 2px; font-size: 12px; user-select: none; touch-action: none; }
+
+.stage { position: relative; }
+.insets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.inset { flex: 1; margin: 0; position: relative; aspect-ratio: 4 / 3; background: #13181b; border: 1px solid rgba(255,255,255,.35); border-radius: 6px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
+.inset img, .inset canvas { width: 100%; height: 100%; object-fit: cover; display: block; aspect-ratio: auto; border-radius: 0; background: #13181b; }
+.inset figcaption { position: absolute; top: 3px; left: 6px; z-index: 1; font-size: 11px; color: #fff; text-shadow: 0 1px 3px #000; pointer-events: none; }
+
+#overhead { cursor: crosshair; }
+#marks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.seg { display: flex; gap: 14px; margin-bottom: 6px; }
+.seg label { margin-top: 0; }
+.mvp-status { margin: 8px 0; font-size: 13px; min-height: 1.4em; }
+.mvp-status.moving { color: var(--warn); font-weight: 600; } .mvp-status.error { color: var(--danger); } .mvp-status.done { color: var(--ok); }
+#cal-list { margin: 6px 0; padding-left: 20px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+label.inline { display: inline-flex; margin: 0 0 0 10px; gap: 4px; }
+
+button.softstop { background: #fff3e0; color: #8a4b00; border: 2px solid #e08a00; font-weight: 700; }
+@media (prefers-color-scheme: dark) { button.softstop { background: #3a2a0e; color: #f2b04a; border-color: #f2b04a; } }
+
+#cam-note label { display: inline-flex; gap: 4px; align-items: center; margin-left: 10px; font-size: .85rem; }
+#cam-note select { font: inherit; }

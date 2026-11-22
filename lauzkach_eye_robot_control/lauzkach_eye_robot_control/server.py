@@ -15,6 +15,7 @@ import math
 import mimetypes
 import threading
 import time
+import urllib.request
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -25,10 +26,17 @@ import numpy as np
 
 from lauzkach_eye_robot_control.camera import FileSource, FrameSource, MjpegSource, decode
 from lauzkach_eye_robot_control.detect import detect, rectify
+from lauzkach_eye_robot_control.closedloop import SimMover, SimTruthObserver
+from lauzkach_eye_robot_control.drive import FACES, SimClient
 from lauzkach_eye_robot_control.grid import WORLD_CORNERS
+from lauzkach_eye_robot_control.robot_map import CalibrationError, RobotMap
+from lauzkach_eye_robot_control.service import ApiError, DriveService
 
 STATIC = Path(__file__).resolve().parent / "static"
 DEFAULT_CAMERA = "http://100.85.56.14:8780/cameras/overhead.mjpg?fps=2&profile=preview"
+DEFAULT_WRIST = "http://100.85.56.14:8780/cameras/wrist.mjpg?fps=10&profile=preview"   # the gripper (first-person) camera
+DEFAULT_ROBOT_POINTS = Path(__file__).resolve().parents[2] / "robotic_arm" / "calibration_poses.json"   # recorded with the real arm
+DEFAULT_SIMULATOR = "http://127.0.0.1:8810"
 KEEP_FRAMES = 12
 SMOOTHING = 0.3          # weight of the newest frame in the smoothed rectangle (before the rectangle is locked)
 JUMP_RESET_PX = 30       # a corner moving farther than this between frames restarts the smoothing
@@ -184,6 +192,11 @@ class Analyzer:
             self._smooth = (1 - SMOOTHING) * self._smooth + SMOOTHING * new
         return self._smooth
 
+    def locked_matrix(self) -> list[list[float]] | None:
+        """The picture-pixel -> table-cm matrix of the locked rectangle, or None until it is locked."""
+        with self.lock:
+            return self.cal.get("px_to_cm") if self.cal["state"] == "locked" else None
+
     def snapshot(self) -> dict:
         with self.lock:
             result = dict(self.result) if self.result else None
@@ -213,6 +226,9 @@ class Analyzer:
 
 class Handler(BaseHTTPRequestHandler):
     analyzer: Analyzer
+    service: DriveService | None = None
+    sim_page: str = ""                                  # the simulator page embedded in the right column
+    wrist_url: str = ""                                 # fixed at start-up, never taken from a request
     protocol_version = "HTTP/1.1"
 
     def _send(self, status: int, body: bytes, ctype: str) -> None:
@@ -226,10 +242,39 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             self.close_connection = True
 
+    def _stream_wrist(self) -> None:
+        """Relay the gripper camera's MJPEG stream (a plain read-only GET of the dashboard). Ends when the page closes it."""
+        if not self.wrist_url:
+            return self._send(404, b"the gripper camera is not configured", "text/plain")
+        try:
+            upstream = urllib.request.urlopen(self.wrist_url, timeout=8)
+        except OSError as exc:
+            return self._send(502, f"the gripper camera is not reachable ({type(exc).__name__})".encode(), "text/plain")
+        with upstream:
+            self.send_response(200)
+            self.send_header("Content-Type", upstream.headers.get("Content-Type", "multipart/x-mixed-replace"))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+            try:
+                while chunk := upstream.read(16384):
+                    self.wfile.write(chunk)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
+        if self.service is not None and path.startswith("/api/"):
+            self.service.touch()                      # the page is still there (the dead-man timer)
+        if path == "/api/drive":
+            if self.service is None:
+                return self._send(200, json.dumps({"enabled": False}).encode(), "application/json")
+            return self._send(200, json.dumps({"enabled": True, "sim_page": self.sim_page, **self.service.overview()}).encode(), "application/json")
         if path == "/api/detect":
             return self._send(200, json.dumps(self.analyzer.snapshot()).encode(), "application/json")
+        if path == "/wrist.mjpg":
+            return self._stream_wrist()
         for prefix, crop in (("/frame/", False), ("/crop/", True)):
             if path.startswith(prefix) and path.endswith(".jpg"):
                 try:
@@ -245,13 +290,43 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, target.read_bytes(), mimetypes.guess_type(target.name)[0] or "application/octet-stream")
 
     def do_POST(self) -> None:
-        if urlsplit(self.path).path != "/api/recalibrate":
-            return self._send(404, b"not found", "text/plain")
+        path = urlsplit(self.path).path
         origin = self.headers.get("Origin")
         if origin is not None and urlsplit(origin).netloc != self.headers.get("Host"):
             return self._send(403, b"cross-origin request refused", "text/plain")
-        self.analyzer.recalibrate()  # restarts the 5 s measurement; only this page's state changes
-        self._send(200, json.dumps(self.analyzer.snapshot()).encode(), "application/json")
+        if self.service is not None:
+            self.service.touch()
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length)) if 0 < length <= 4096 else {}
+            if not isinstance(body, dict):
+                raise ValueError("expected a JSON object")
+            if path == "/api/recalibrate":
+                self.analyzer.recalibrate()          # restarts the 5 s measurement; only this page's state changes
+                return self._send(200, json.dumps(self.analyzer.snapshot()).encode(), "application/json")
+            if self.service is None or not path.startswith("/api/drive/"):
+                return self._send(404, b"not found", "text/plain")
+            envelope = {k: body.get(k) for k in ("cid", "sent_ms", "gen", "max_age_ms")}
+            if path == "/api/drive/go":
+                result = self.service.go_click(envelope, float(body["px"]), float(body["py"]), float(body.get("height_cm", 3.0)),
+                                               bool(body.get("closed_loop", False)), str(body.get("target", "sim")), bool(body.get("confirm_real", False)))
+            elif path == "/api/drive/grasp":
+                result = self.service.grasp(envelope, str(body["action"]), None if body.get("px") is None else float(body["px"]),
+                                            None if body.get("py") is None else float(body["py"]), bool(body.get("confirm_real", False)))
+            elif path == "/api/drive/corner":
+                result = self.service.go_corner(envelope, int(body["index"]), float(body.get("height_cm", 3.0)), bool(body.get("closed_loop", False)),
+                                                str(body.get("target", "sim")), bool(body.get("confirm_real", False)))
+            elif path == "/api/drive/stop":
+                result = self.service.stop()
+            elif path == "/api/drive/faces":
+                result = self.service.set_faces(str(body.get("faces")))
+            else:
+                return self._send(404, b"not found", "text/plain")
+            self._send(200, json.dumps(result).encode(), "application/json")
+        except ApiError as exc:
+            self._send(exc.status, json.dumps({"error": str(exc), "code": exc.code}).encode(), "application/json")
+        except (KeyError, ValueError, TypeError):
+            self._send(400, json.dumps({"error": "malformed request", "code": "bad_request"}).encode(), "application/json")
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002 - quiet unless something fails
         if args and str(args[1]).startswith(("4", "5")):
@@ -261,14 +336,60 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--camera", default=DEFAULT_CAMERA, help="MJPEG stream of the overhead camera (read-only GET)")
+    ap.add_argument("--wrist-camera", default=DEFAULT_WRIST, help="MJPEG stream of the gripper (first-person) camera; empty to turn it off")
     ap.add_argument("--image", help="use this picture instead of the camera")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8820)
     ap.add_argument("--calibration-seconds", type=float, default=CALIBRATION_S,
                     help="measure the rectangle for this long after start-up, then lock it (default 5)")
+    ap.add_argument("--robot-points", default=str(DEFAULT_ROBOT_POINTS),
+                    help="calibration points recorded with the real arm (calibration_poses.json); enables the drive panel")
+    ap.add_argument("--simulator", default=DEFAULT_SIMULATOR, help="the simulator's web server (must be http://127.0.0.1:... unless you say otherwise)")
+    ap.add_argument("--robot-faces", choices=FACES, default="up", help="which way the robot faces in the camera picture")
+    ap.add_argument("--closed-loop-demo", metavar="DX,DY", help="demo on the simulator: pretend the board is DX,DY mm off from the arm's coordinates (e.g. 12,-8) "
+                    "and let the closed loop correct it. A stand-in for the camera, not the real thing.")
+    ap.add_argument("--real-arm", action="store_true",
+                    help="ENABLE moves of the REAL arm (the five buttons only; hover 3 cm or more, slow, each move confirmed in the page). Off by default.")
+    ap.add_argument("--real-agent", default="", help="use the ARM AGENT running next to the arm (http://host:port) instead of driving the dashboard from this machine; implies --real-arm")
+    ap.add_argument("--agent-token-file", default="", help="file with the agent's shared secret")
+    ap.add_argument("--dashboard", default="http://100.85.56.14:8780", help="the RAMION dashboard the real arm is reached through")
+    ap.add_argument("--deadman-seconds", type=float, default=3.0, help="hold the arm if the page is silent this long during a move")
     args = ap.parse_args()
     source: FrameSource = FileSource(args.image) if args.image else MjpegSource(args.camera)
     Handler.analyzer = Analyzer(source, calibration_s=args.calibration_seconds)
+    try:
+        robot_map = RobotMap.load(args.robot_points)
+    except (OSError, CalibrationError, ValueError, KeyError) as exc:
+        robot_map = None
+        print(f"drive panel limited: no robot calibration ({exc})")
+    sim_client = SimClient(args.simulator)
+    closed_loop, demo_error = None, (0.0, 0.0)
+    if args.closed_loop_demo:
+        demo_error = tuple(float(v) / 1000.0 for v in args.closed_loop_demo.split(","))
+        closed_loop = (SimMover(sim_client), SimTruthObserver(sim_client, demo_error, noise_mm=0.5))
+        print(f"closed-loop DEMO: the simulated board is {args.closed_loop_demo} mm off the arm's coordinates")
+    real = None
+    if args.real_agent:
+        from lauzkach_eye_robot_control.drive import RemoteRealClient
+        if not args.agent_token_file:
+            raise SystemExit("--real-agent needs --agent-token-file")
+        real = RemoteRealClient(args.real_agent, Path(args.agent_token_file).read_text().strip())
+        print(f"*** REAL ARM via the arm agent at {args.real_agent}: the five buttons can move the physical arm. Keep Stop (Esc) ready. ***")
+    elif args.real_arm:
+        if robot_map is None:
+            raise SystemExit("--real-arm needs the robot calibration points (--robot-points)")
+        from robotic_arm.clickmove import pooled_http          # needs the robotic_arm environment (the arm's kinematics)
+        from soarm_lab.kinematics import RobotKinematics
+        from soarm_lab.robot import load_robot
+
+        from lauzkach_eye_robot_control.realarm import RealArmClient
+        real = RealArmClient(pooled_http(args.dashboard), RobotKinematics(load_robot()), [(p["x"], p["y"]) for p in robot_map.points], robot_map.z_table)
+        print("*** REAL ARM ENABLED: the five buttons can move the physical arm (hover >= 3 cm, slow, each move confirmed). Keep Stop (Esc) ready. ***")
+    Handler.wrist_url = args.wrist_camera
+    Handler.sim_page = args.simulator.rstrip("/") + "/"
+    Handler.service = DriveService(Handler.analyzer.locked_matrix, robot_map, sim_client, faces=args.robot_faces,
+                                   deadman_s=args.deadman_seconds, closed_loop=closed_loop, sim_calibration_error=demo_error, real=real)
+    Handler.service.start()
     Handler.analyzer.start()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.daemon_threads = True
@@ -278,6 +399,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        Handler.service.stop_background()
         Handler.analyzer.stop()
 
 

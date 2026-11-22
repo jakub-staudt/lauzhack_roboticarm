@@ -22,6 +22,7 @@
   </section>
 
   <section class="panel">
+    <div id="twin" class="twin" hidden data-tone="idle"><b>Digital twin</b> <span id="twin-text">Connecting to the real arm…</span></div>
     <div class="modes" role="tablist" aria-label="What a tap does">
       <button id="mode-pp" role="tab" aria-selected="true">Move a block</button>
       <button id="mode-go" role="tab" aria-selected="false">Move the gripper</button>
@@ -40,6 +41,7 @@
     </div>
     <div class="actions small">
       <button id="home">Home</button>
+      <button id="park" title="Move the gripper to 3 cm above the bottom-left corner, out of the camera's way">Park</button>
       <button id="reset">Reset blocks</button>
       <label class="check"><input type="checkbox" id="confirm"> Ask before moving</label>
     </div>

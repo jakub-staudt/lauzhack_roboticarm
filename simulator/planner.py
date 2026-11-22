@@ -18,10 +18,10 @@ from simulator.run import build_model, load_station
 from soarm_lab.kinematics import RobotKinematics
 from soarm_lab.station import PREFIX
 
-CUBE = 0.02
+CUBE = 0.049                          # the real blocks: about 49 mm across (measured by gripping one: fingertip gap 49.4 mm)
 GRIP_Z = TABLE_Z + CUBE / 2 + 0.002   # tip height when grasping / placing: cube centre
-HOVER = 0.045                         # extra tip height for travel: a carried 20 mm cube still clears the table by 3 cm
-GRIPPER_OPEN, GRIPPER_CLOSED = 45.0, 0.0
+HOVER = 0.045                         # extra tip height for travel (higher is unreachable top-down for this arm: 6.5 cm reaches nothing)
+GRIPPER_OPEN, GRIPPER_CLOSED = 80.0, 0.0   # open 80 = fingertip gap 73 mm (12 mm to spare each side of a 49 mm block)
 # Motion follows minimum-jerk profiles (smooth start and stop, peak speed = 1.875 x the average), sampled every SAMPLE_DT.
 SAMPLE_DT = 0.05                      # seconds between waypoints
 LINEAR_V = 0.09                       # peak tip speed [m/s]; the real arm's "fast" profile is 0.05
@@ -29,9 +29,16 @@ JOINT_W = 0.9                         # peak joint speed [rad/s] (about 50 deg/s
 GRIPPER_RATE = 60.0                   # peak gripper speed [units/s]
 MIN_MOVE_S = 0.4                      # even a tiny move takes at least this long
 SETTLE_S = 0.3                        # pause where the arm comes to rest: before closing and after opening the gripper
-GRASP_SHIFT = 0.0095                  # the cube slides ~9.5 mm against the fixed jaw when grasped; aim the drop that far along the jaw axis
+# Jaw geometry (measured in the model, along the jaw-closing axis): the FIXED jaw's tip is 20.1 mm to one side of the tool point (the
+# point the planner aims), and the moving jaw closes against it. So a grasped block ends up pressed against the fixed jaw, its centre
+# (CUBE / 2 - 20.1 mm) from the tool point, and the approach must stop with the fixed jaw a few mm clear of the block's face.
+FIXED_TIP = 0.0201
+APPROACH_CLEARANCE = 0.004            # gap between the fixed jaw and the block's face before closing
+GRASP_SHIFT = -(CUBE / 2 - FIXED_TIP)  # aim the drop this far along the jaw axis (20 mm cube: +10.1 mm, 49 mm block: -4.4 mm)
+PICK_OFFSET = CUBE / 2 + APPROACH_CLEARANCE - FIXED_TIP   # aim the pick this far BEHIND the block's centre along the jaw axis
 MAX_ROT_ERR = 0.2                     # rad: accepted deviation from a top-down gripper
 YAWS = (0.0, math.pi / 2, -math.pi / 2, math.pi)
+TILTED_PITCHES_DEG = (75.0, 60.0, 45.0, 35.0)   # gripper approach angles below horizontal tried when straight down is out of reach
 
 Plan = list[tuple[str, dict[str, float], float]]
 
@@ -135,13 +142,16 @@ class Planner:
         return joints
 
     # ------------------------------------------------------------------ plans
-    def pick_and_place(self, current: dict[str, float], src: tuple[float, float], dst: tuple[float, float]) -> Plan:
-        """`current`: measured joints in radians by name. `src`, `dst`: world (x, y) of the cube centres."""
+    def pick_and_place(self, current: dict[str, float], src: tuple[float, float], dst: tuple[float, float],
+                       park: tuple[float, float] | None = None, park_height: float = 0.03) -> Plan:
+        """`current`: measured joints in radians by name. `src`, `dst`: world (x, y) of the cube centres. After the move the arm goes
+        to `park` (world x, y), `park_height` above the table, so it is out of the camera's way; without `park`, to the home pose."""
         seed = {**self.to_app(current)}
         seed["gripper"] = GRIPPER_OPEN
         yaw, pick, place, why = None, None, None, ""
         for candidate in YAWS:  # the first top-down orientation that reaches both spots wins
-            at_src = self._poses(src, seed, (candidate,))
+            aim = (src[0] - PICK_OFFSET * math.cos(candidate), src[1] - PICK_OFFSET * math.sin(candidate))
+            at_src = self._poses(aim, seed, (candidate,))
             if not at_src:
                 why = why or "The arm cannot reach the block at the source spot with a top-down grasp."
                 continue
@@ -169,17 +179,55 @@ class Planner:
         joints = self._line(plan, "lower", pos(joints), pos(dst_low) + [0, 0, 0.003], rotation, joints)
         joints = self._gripper(plan, "release", joints, GRIPPER_OPEN)
         joints = self._line(plan, "rise", pos(joints), pos(dst_hover), rotation, joints)
-        self._joint_move(plan, "home", joints, {**self.home, "gripper": GRIPPER_OPEN})
+        if park is None:
+            self._joint_move(plan, "home", joints, {**self.home, "gripper": GRIPPER_OPEN})
+        else:
+            self._to_park(plan, joints, pos(dst_hover), rotation, park, park_height)
         return plan
 
+    def _to_park(self, plan: Plan, joints: dict[str, float], tip: np.ndarray, rotation: np.ndarray, park: tuple[float, float],
+                 height: float) -> None:
+        """From a hover over the destination to `height` above the park spot: along the carry height first, then straight down.
+        Same gripper orientation if the arm can hold it there, otherwise a joint-space move between two hover poses."""
+        z_high = float(tip[2])
+        high = np.array([park[0] - self.base[0], park[1] - self.base[1], z_high])
+        low = np.array([park[0] - self.base[0], park[1] - self.base[1], TABLE_Z - self.base[2] + height])
+        try:
+            joints = self._line(plan, "park", tip, high, rotation, joints)
+        except Unreachable:                                   # the carry orientation does not reach the park spot: turn at height
+            for yaw in YAWS:
+                sol, _ = self._solve(park, TABLE_Z + (z_high - (TABLE_Z - self.base[2])), yaw, joints)
+                if self._good(sol):
+                    rotation = _rz(yaw) @ _TOP_DOWN
+                    joints = self._joint_move(plan, "park", joints, {**sol.joints, "gripper": joints["gripper"]})
+                    break
+            else:
+                raise Unreachable("The arm cannot reach the park spot.") from None
+        self._line(plan, "park", high, low, rotation, joints)
+
     def go_to(self, current: dict[str, float], xy: tuple[float, float], height: float = 0.03) -> Plan:
-        """Move the tip over `xy` at `height` above the table, gripper unchanged, tool pointing down."""
+        """Move the tip over `xy` at `height` above the table, gripper unchanged. Straight down if the arm can, otherwise with
+        the gripper tilted (a hover does not need a grasp: the real arm also reaches its far corners with a tilted gripper)."""
         seed = self.to_app(current)
         for yaw in YAWS:
             sol, _ = self._solve(xy, TABLE_Z + height, yaw, seed)
             if self._good(sol):
                 plan: Plan = []
                 self._joint_move(plan, "move", seed, {**sol.joints, "gripper": seed["gripper"]})
+                return plan
+        target = np.array([xy[0], xy[1], TABLE_Z + height]) - self.base
+        azimuth = math.atan2(target[1], target[0] - 0.0388)       # the arm's pan axis is 38.8 mm in front of its base origin
+        for pitch in TILTED_PITCHES_DEG:
+            # tool X (the approach direction) points down at `pitch` degrees below horizontal, toward the target's azimuth
+            p = math.radians(pitch)
+            x_axis = np.array([math.cos(p) * math.cos(azimuth), math.cos(p) * math.sin(azimuth), -math.sin(p)])
+            y_axis = np.array([-math.sin(azimuth), math.cos(azimuth), 0.0])
+            rotation = np.column_stack([x_axis, y_axis, np.cross(x_axis, y_axis)])
+            sol = self.kin.ik(target, rotation, seed, rot_gain=0.8, tol=0.0005, iters=300, restarts=2,
+                              accept=lambda j: not self.kin.self_contacts(j))
+            if sol.ok and sol.rot_err < MAX_ROT_ERR:
+                plan = []
+                self._joint_move(plan, f"move (gripper tilted {pitch:.0f} deg)", seed, {**sol.joints, "gripper": seed["gripper"]})
                 return plan
         raise Unreachable("The arm cannot reach that spot.")
 

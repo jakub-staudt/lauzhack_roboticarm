@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from simulator.frame import block_to_world
-from simulator.planner import GRASP_SHIFT, GRIP_Z, GRIPPER_CLOSED, GRIPPER_OPEN, Planner, Unreachable
+from simulator.planner import GRASP_SHIFT, GRIP_Z, GRIPPER_CLOSED, GRIPPER_OPEN, PICK_OFFSET, Planner, Unreachable
 
 
 @pytest.fixture(scope="module")
@@ -25,9 +25,10 @@ def test_pick_and_place_plan_grasps_at_the_source_and_releases_at_the_destinatio
 
     grasp = max(i for i, w in enumerate(plan) if w[0] == "grasp")
     release = max(i for i, w in enumerate(plan) if w[0] == "release")
-    assert np.allclose(tip(grasp)[:2], src, atol=0.004) and tip(grasp)[2] == pytest.approx(GRIP_Z, abs=0.004)
+    # the tool point is aimed PICK_OFFSET behind the block's centre along the jaw axis (the fixed jaw's tip is 20 mm to one side of it)
+    assert np.linalg.norm(tip(grasp)[:2] - src) == pytest.approx(PICK_OFFSET, abs=0.004) and tip(grasp)[2] == pytest.approx(GRIP_Z, abs=0.004)
     # the tip releases GRASP_SHIFT beyond the target along the jaw axis, because the held cube sits against the fixed jaw
-    assert np.linalg.norm(tip(release)[:2] - dst) == pytest.approx(GRASP_SHIFT, abs=0.004)
+    assert np.linalg.norm(tip(release)[:2] - dst) == pytest.approx(abs(GRASP_SHIFT), abs=0.004)
     gripper = lambda i: planner.to_app(plan[i][1])["gripper"]  # noqa: E731
     assert gripper(grasp) == pytest.approx(GRIPPER_CLOSED, abs=0.5)
     assert gripper(release) == pytest.approx(GRIPPER_OPEN, abs=0.5)
@@ -43,3 +44,24 @@ def test_unreachable_spots_are_refused_with_a_reason(planner):
         planner.pick_and_place(home, (0.45, 0.3), block_to_world("left", 16, 6))
     with pytest.raises(Unreachable, match="destination"):
         planner.pick_and_place(home, (-0.11, 0.05), (0.45, -0.3))
+
+
+def test_hovering_over_a_far_point_tilts_the_gripper_instead_of_refusing(planner):
+    home = planner.to_rad({**planner.home, "gripper": 35.0})
+    near = planner.go_to(home, (planner.base[0] + 0.184, planner.base[1] + 0.038), height=0.03)
+    far = planner.go_to(home, (planner.base[0] + 0.403, planner.base[1] - 0.143), height=0.03)
+    assert near[-1][0] == "move" and "tilted" in far[-1][0]               # straight down when possible, tilted only when needed
+    tip = planner.kin.tcp(planner.to_app(far[-1][1]))[:3, 3]
+    assert np.allclose(tip, [0.403, -0.143, 0.03], atol=0.003)            # and it still ends exactly over the point, 3 cm up
+
+
+def test_pick_and_place_ends_parked_3_cm_above_the_given_spot_and_never_dips_below(planner):
+    home = planner.to_rad({**planner.home, "gripper": 35.0})
+    park = (float(planner.base[0]) + 0.1996, float(planner.base[1]) + 0.0429)            # the recorded bottom-left corner
+    plan = planner.pick_and_place(home, (-0.11, 0.05), block_to_world("left", 16, 6), park=park, park_height=0.03)
+    assert plan[-1][0] == "park"
+    tip = planner.kin.tcp(planner.to_app(plan[-1][1]))[:3, 3]
+    assert np.allclose(tip, [0.1996, 0.0429, 0.03], atol=0.003)
+    heights = [planner.kin.tcp(planner.to_app(q))[2, 3] for label, q, _ in plan if label == "park"]
+    assert min(heights) > 0.029                                                          # never lower than the park height on the way
+    assert plan[0][0] == "open" and "home" not in {label for label, _, _ in plan}        # no return to the old home pose

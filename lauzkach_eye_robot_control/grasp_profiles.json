@@ -1,0 +1,26 @@
+{
+ "_about": "Grasp profiles for the real arm. Search results: simulator/grasp_search_results/2026-11-22/. 'current' = the settings used up to 2026-11-22; 'sim_elite' = the best group of the simulator search (elite mean: lifted 11/13, placed 7/13 in the simulator). Values in metres / gripper units.",
+ "current": {
+  "open_value": 80.0,
+  "pick_offset_override": null,
+  "grasp_tip_above_table_m": 0.0185,
+  "hover_above_table_m": 0.062,
+  "description": "fixed jaw 4 mm clear of the block, tool point 8 mm below the block centre"
+ },
+ "sim_elite": {
+  "open_value": 92.0,
+  "pick_offset_override": 0.02303,
+  "grasp_tip_above_table_m": 0.02867,
+  "hover_above_table_m": 0.07,
+  "description": "simulator search, elite mean: opening 92, approach offset 23 mm, grasp height 28.7 mm (search hover 83 mm tool height; 70 mm used, it is easier to reach); search grasp_shift -11.6 mm is for placing and unused here; closing speed and settle time are not applied (the real closing stays slow)",
+  "search": {
+   "open_value": 92.18,
+   "pick_offset": 0.02303,
+   "grip_h": 0.02867,
+   "grasp_shift": -0.01163,
+   "hover": 0.05432,
+   "settle": 0.3145,
+   "rate": 64.73
+  }
+ }
+}

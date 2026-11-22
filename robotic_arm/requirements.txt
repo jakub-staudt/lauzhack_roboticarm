@@ -1,0 +1,6 @@
+mujoco
+numpy
+scipy
+pyyaml
+pytest
+# also: pip install --no-deps -e ../monorepo-main/apps/arm-workbench/packages/soarm -e ../monorepo-main/apps/arm-workbench/packages/soarm_lab
