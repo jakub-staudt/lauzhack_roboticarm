@@ -103,7 +103,12 @@ class RealArmSource(override val baseUrl: String, private val scope: CoroutineSc
     var drive by mutableStateOf<DriveOverview?>(null); private set
     override var frame by mutableStateOf<ImageBitmap?>(null); private set
     override var imageSize by mutableStateOf<Pair<Float, Float>?>(null); private set
-    private var lastError by mutableStateOf<String?>(null)
+    private var lastErrorText by mutableStateOf<String?>(null)
+    private var lastErrorAt = TimeSource.Monotonic.markNow()
+    /** A command's problem, shown for 8 s (the server's own error stays visible through the sequence status). */
+    private var lastError: String?
+        get() = lastErrorText?.takeIf { lastErrorAt.elapsedNow().inWholeSeconds < 8 }
+        set(v) { lastErrorText = v; lastErrorAt = TimeSource.Monotonic.markNow() }
     private var serverUp by mutableStateOf(false)
     private var loadedSeq = -1L
     private var serverMsAt = 0.0
@@ -224,8 +229,15 @@ class RealArmSource(override val baseUrl: String, private val scope: CoroutineSc
 
     override val operations = listOf(Operation("pick_place", "Pick & place", true))
 
+    /** The arm server was started without the real arm: choosing works, but nothing is sent. */
+    val viewOnly: Boolean get() = drive?.real?.available == false
+
     override fun execute(op: Operation, cube: Cube, dest: Offset?) {
         if (op.key != "pick_place" || dest == null) return
+        if (viewOnly) {
+            lastError = "View-only: the real arm is not connected, nothing was moved (${cube.name} -> chosen spot)."
+            return
+        }
         val others = objects().filter { hypot((it.img.x - cube.img.x).toDouble(), (it.img.y - cube.img.y).toDouble()) > 40 }
         send("/api/drive/pickplace", {
             buildJsonObject {
@@ -274,8 +286,6 @@ class RealArmSource(override val baseUrl: String, private val scope: CoroutineSc
             if (!serverUp) return "Waiting for the arm server at $baseUrl (run_real.command starts it)"
             val s = snapshot ?: return "Connecting to the arm server…"
             if (s.source.status != "live" && frame == null) return "Waiting for the camera in Poland (${s.source.error ?: s.source.status})"
-            val d = drive
-            if (d != null && !d.real.available) return "The arm server runs without the real arm (start it with --real-agent)"
             return when (s.calibration.state) {
                 "locked" -> null
                 "countdown" -> "Measuring the table rectangle… ${s.calibration.remaining?.toInt() ?: ""} s"
@@ -288,7 +298,7 @@ class RealArmSource(override val baseUrl: String, private val scope: CoroutineSc
         get() {
             val r = drive?.real ?: return "arm server: not connected"
             return when {
-                !r.available -> "arm: not enabled"
+                !r.available -> "arm: view-only (not connected)"
                 r.connected == false -> "arm: agent not reachable"
                 else -> "arm: " + (sequence?.let { if (it.state == "running") "moving" else it.state } ?: "ready")
             }
