@@ -14,6 +14,14 @@
 
 <br/>
 
+<img src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black" alt="Linux"/>
+<img src="https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white" alt="Windows"/>
+<img src="https://img.shields.io/badge/iOS-000000?style=flat-square&logo=apple&logoColor=white" alt="iOS"/>
+
+<br/>
+
+<br/>
+
 [**Live Project Website**](https://claude.ai/artifact/NsY2vBKaEEffSLKGwzH8wE) · [**Source Code**](https://github.com/jakub-staudt/lauzhack_roboticarm)
 
 <br/>
@@ -357,6 +365,8 @@ kmp_app/
 | `Main.kt` | Desktop application entry point |
 
 ## Multiplatform design strategy
+
+![images4](assets/images/image0.jpg)
 
 A central design decision was to keep the majority of the application in `commonMain`.
 
