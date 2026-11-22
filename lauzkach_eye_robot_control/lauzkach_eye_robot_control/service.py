@@ -135,7 +135,7 @@ class DriveService:
             return {"available": True, "connected": False, "error": str(exc)}
         out = {"available": True, "connected": st["connected"], "task": st["task"], "tip_base": st["tip_base"], "owner": st["owner"],
                "emergency_stop": st["emergency_stop"], "gripper": st["gripper"],
-               "height_guard": bool(st.get("height_guard"))}
+               "height_guard": bool(st.get("height_guard")), "grasp": st.get("grasp")}
         if self.robot_map is not None and matrix is not None:
             u, v = self.robot_map.xy_to_uv(st["tip_base"]["x"], st["tip_base"]["y"])
             out["tip_px"] = [round(c, 1) for c in uv_to_px(matrix, u, v, self.faces)]
@@ -219,6 +219,32 @@ class DriveService:
         u, v = min(1.0, max(0.0, u)), min(1.0, max(0.0, v))
         label = f"the clicked point (u {u:.2f}, v {v:.2f})"
         return self._move_closed(env, u, v, height_cm, label) if closed_loop else self._move(env, u, v, height_cm, label, real)
+
+    def grasp(self, env: dict, action: str, px: float | None = None, py: float | None = None, confirm_real: bool = False) -> dict:
+        """One stage of the supervised real grasp (open, hover, lower, close, lift, putback). The agent enforces the order and the safety checks."""
+        duplicate = self._admit(env)
+        if duplicate:
+            return duplicate
+        self._require_real(False, confirm_real)
+        if not hasattr(self.real, "grasp_action"):
+            raise ApiError(409, "This arm client cannot grasp.", "no_grasp")
+        x = y = None
+        if action == "hover":
+            if px is None or py is None:
+                raise ApiError(400, "Click the block on the picture first.", "bad_request")
+            u, v = px_to_uv(self._matrix(), px, py, self.faces)
+            if not (-INSIDE_MARGIN <= u <= 1 + INSIDE_MARGIN and -INSIDE_MARGIN <= v <= 1 + INSIDE_MARGIN):
+                raise ApiError(400, "That click is outside the rectangle.", "outside")
+            x, y = self._require_map().uv_to_xy(min(1.0, max(0.0, u)), min(1.0, max(0.0, v)))
+        try:
+            result = self.real.grasp_action(action, x, y)
+        except RuntimeError as exc:
+            self._note(f"The real arm refused the grasp step '{action}': {exc}")
+            raise ApiError(409, str(exc), "real_refused") from exc
+        answer = {"action": action, "real": True, "task": result}
+        self.guard.record(env.get("cid"), answer)
+        self._note(f"Grasp step '{action}' started on the REAL arm" + (f" for the block at x {x * 100:.1f}, y {y * 100:.1f} cm." if x is not None else "."))
+        return answer
 
     def go_corner(self, env: dict, index: int, height_cm: float, closed_loop: bool = False, target: str = "sim",
                   confirm_real: bool = False) -> dict:

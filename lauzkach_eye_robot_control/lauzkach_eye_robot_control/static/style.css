@@ -60,6 +60,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .progress[data-tone="ok"] .pg-fill { background: var(--ok, #1f8a3b); }
 .progress[data-tone="bad"] .pg-fill { background: var(--bad); }
 .pg-tip { margin-top: 6px; font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.grasp-card { flex-direction: column; flex-wrap: nowrap; align-items: stretch; border: 2px solid var(--bad); border-radius: 12px; padding: 10px; }
+.grasp-card[hidden] { display: none; }
+.drive-block.grasp-card > div:first-child { flex: 0 0 auto; }
+.grasp-card .grasp-steps { flex: 0 0 auto; }
+.grasp-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.grasp-head span { font-size: .9rem; color: var(--muted); }
+.grasp-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 640px) { .grasp-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.grasp-steps button { min-height: 52px; font-size: .88rem; line-height: 1.2; }
+.grasp-steps button.next { border-color: #2f6fed; box-shadow: 0 0 0 2px rgba(47,111,237,.35); }
 .arm-choice { display: flex; gap: 16px; align-items: center; }
 .arm-choice label { display: inline-flex; gap: 6px; align-items: center; }
 .real-warn { margin: 6px 0; padding: 10px 12px; border-radius: 10px; background: var(--bad-bg); color: var(--bad); border: 2px solid var(--bad); font-size: .92rem; }

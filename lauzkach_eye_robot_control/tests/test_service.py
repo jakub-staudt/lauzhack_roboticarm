@@ -194,7 +194,7 @@ class FakeReal:
     """Stands in for RealArmClient: records what it is asked and can refuse like the real one."""
 
     def __init__(self):
-        self.moves, self.stops, self.refuse, self.guard = [], 0, None, True
+        self.moves, self.stops, self.refuse, self.guard, self.grasps = [], 0, None, True, []
 
     def state(self):
         return {"task": {"state": "idle", "message": ""}, "tip_base": {"x": 0.2, "y": 0.0, "z": 0.03}, "connected": True, "owner": None,
@@ -204,6 +204,12 @@ class FakeReal:
         if self.refuse:
             raise RuntimeError(self.refuse)
         self.moves.append((x, y, height_cm))
+        return {"state": "planning"}
+
+    def grasp_action(self, action, x=None, y=None):
+        if self.refuse:
+            raise RuntimeError(self.refuse)
+        self.grasps.append((action, x, y))
         return {"state": "planning"}
 
     def stop(self):
@@ -293,3 +299,30 @@ def test_the_simulators_digital_twin_status_reaches_the_page():
     original = sim.state
     sim.state = lambda: {**original(), "twin": {"available": True, "enabled": True, "ok": True}}
     assert service.overview()["sim"]["twin"]["enabled"] is True
+
+
+def test_a_grasp_step_needs_the_real_arm_a_confirmation_and_for_hover_a_click_inside_the_rectangle():
+    real = FakeReal()
+    service, sim, clock = real_rig(real)
+    with pytest.raises(ApiError) as err:
+        service.grasp(env(service, clock, "s1"), "open", confirm_real=False)
+    assert err.value.code == "confirm" and real.grasps == []
+    service.grasp(env(service, clock, "s2"), "open", confirm_real=True)
+    assert real.grasps == [("open", None, None)]
+    with pytest.raises(ApiError, match="Click the block"):
+        service.grasp(env(service, clock, "s3"), "hover", confirm_real=True)
+    with pytest.raises(ApiError) as err:
+        service.grasp(env(service, clock, "s4"), "hover", -500, -500, confirm_real=True)
+    assert err.value.code == "outside" and len(real.grasps) == 1
+    service.grasp(env(service, clock, "s5"), "hover", 100, 100, confirm_real=True)
+    action, x, y = real.grasps[-1]
+    assert action == "hover" and x is not None and y is not None
+
+
+def test_the_agents_refusal_of_a_grasp_step_reaches_the_page_as_a_reason():
+    real = FakeReal()
+    real.refuse = "Not now: after 'idle' the next steps are open."
+    service, sim, clock = real_rig(real)
+    with pytest.raises(ApiError) as err:
+        service.grasp(env(service, clock, "s6"), "lower", confirm_real=True)
+    assert err.value.code == "real_refused" and "Not now" in str(err.value)

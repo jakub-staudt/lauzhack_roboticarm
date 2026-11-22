@@ -1,0 +1,97 @@
+[
+ {
+  "name": "current settings",
+  "params": {
+   "open_value": 80.0,
+   "pick_offset": 0.0084,
+   "grip_h": 0.0185,
+   "grasp_shift": -0.0044,
+   "hover": 0.045,
+   "settle": 0.3,
+   "rate": 60.0
+  },
+  "n": 21,
+  "mean_score": 1.3333333333333333,
+  "reached": 12,
+  "lifted": 7,
+  "carried": 7,
+  "placed": 1,
+  "skipped": 9
+ },
+ {
+  "name": "found #1",
+  "params": {
+   "open_value": 78.57717104752503,
+   "pick_offset": 0.004061509863949018,
+   "grip_h": 0.021697418986062054,
+   "grasp_shift": -0.00704735177923042,
+   "hover": 0.055,
+   "settle": 0.4953697670300522,
+   "rate": 40.52385106534389
+  },
+  "n": 17,
+  "mean_score": 2.0,
+  "reached": 10,
+  "lifted": 9,
+  "carried": 9,
+  "placed": 6,
+  "skipped": 13
+ },
+ {
+  "name": "found #2",
+  "params": {
+   "open_value": 76.65045685501431,
+   "pick_offset": 0.01388957446555325,
+   "grip_h": 0.019987422908175,
+   "grasp_shift": -0.015,
+   "hover": 0.05172021901551813,
+   "settle": 0.45464171797488145,
+   "rate": 35.85052893180407
+  },
+  "n": 17,
+  "mean_score": 2.6470588235294117,
+  "reached": 14,
+  "lifted": 12,
+  "carried": 12,
+  "placed": 6,
+  "skipped": 13
+ },
+ {
+  "name": "found #3",
+  "params": {
+   "open_value": 79.98706772047841,
+   "pick_offset": 0.0023549457249738793,
+   "grip_h": 0.02270585497100129,
+   "grasp_shift": -0.008011139013262199,
+   "hover": 0.051063597031738156,
+   "settle": 0.4914804549127322,
+   "rate": 36.50680364562891
+  },
+  "n": 17,
+  "mean_score": 1.4705882352941178,
+  "reached": 7,
+  "lifted": 7,
+  "carried": 7,
+  "placed": 4,
+  "skipped": 13
+ },
+ {
+  "name": "elite mean",
+  "params": {
+   "open_value": 92.17949416636556,
+   "pick_offset": 0.02303363151031559,
+   "grip_h": 0.028667357533668114,
+   "grasp_shift": -0.011626233176271287,
+   "hover": 0.054322990639221025,
+   "settle": 0.3144765675081587,
+   "rate": 64.7282872207684
+  },
+  "n": 13,
+  "mean_score": 3.076923076923077,
+  "reached": 8,
+  "lifted": 11,
+  "carried": 11,
+  "placed": 7,
+  "skipped": 17
+ }
+]

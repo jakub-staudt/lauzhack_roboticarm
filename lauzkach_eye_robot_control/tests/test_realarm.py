@@ -27,9 +27,10 @@ LIMITS = {"shoulder_pan": [-105, 65], "shoulder_lift": [-95, 95], "elbow_flex": 
 class FakeDashboard:
     """The few dashboard routes the adapter uses. Targets are reached instantly; every call is recorded."""
 
-    def __init__(self, joints=None, owner=None, gripper=10.0, limits=None, estop=False, sag=None):
+    def __init__(self, joints=None, owner=None, gripper=10.0, limits=None, estop=False, sag=None, gripper_floor=7.7):
         self.m = {**(joints or START), "gripper": gripper}
         self.cmd = dict(self.m)                      # what was commanded; `m` is what is measured (command + sag)
+        self.gripper_floor = gripper_floor           # the jaws cannot close below this (49.4 with a block between them)
         self.sag = sag or {}                         # degrees of gravity sag per joint, added to the measurement
         self.owner, self.token, self.estop, self.limits = owner, None, estop, limits or LIMITS
         self.targets, self.calls, self.beats, self.stops = [], [], 0, 0
@@ -56,6 +57,8 @@ class FakeDashboard:
             self.targets.append((body["joint"], body["value"]))
             self.cmd[body["joint"]] = body["value"]
             self.m[body["joint"]] = body["value"] + self.sag.get(body["joint"], 0.0)
+            if body["joint"] == "gripper":
+                self.m["gripper"] = max(body["value"], self.gripper_floor)
             return {}
         if path == "/api/stop":
             self.stops += 1
@@ -251,3 +254,236 @@ def test_a_move_is_stopped_if_the_measured_tip_sags_below_the_height_limit():
     finish(c)
     st = c.mover.status()
     assert st["state"] == "error" and "sags" in st["message"] and dash.stops >= 1 and dash.owner is None
+
+
+# ------------------------------------------------------------------------------------------------ the staged real grasp
+def grasp_rig(**kw):
+    rest = {k: float(v) for k, v in POINTS[0]["joints"].items()}                    # resting at corner_00: the gripper points nearly straight down
+    dash = FakeDashboard(joints=rest, gripper=10.0, **kw)
+    c = client(dash)
+    return dash, c, rest
+
+
+def run_stage(c, action, **kw):
+    c.grasp_action(action, **kw)
+    finish(c, 90.0)
+    return c.mover.status()
+
+
+def block_xy(rest, dx=0.03, dy=-0.02):
+    t = tip(rest)
+    return float(t[0] + dx), float(t[1] + dy)
+
+
+def test_stages_must_follow_each_other():
+    dash, c, rest = grasp_rig()
+    with pytest.raises(MoveError, match="Not now"):
+        c.grasp_action("lower")
+    assert c.state()["grasp"]["next"] == ["open"] and dash.targets == []
+
+
+def test_open_hover_lower_grip_lift_putback_for_a_block_that_stalls_the_jaws_at_49():
+    dash, c, rest = grasp_rig(gripper_floor=49.4)
+    x, y = block_xy(rest)
+    assert run_stage(c, "open")["state"] == "done" and dash.m["gripper"] == pytest.approx(80.0, abs=1.5)
+    assert c.state()["grasp"]["stage"] == "open"
+    assert run_stage(c, "hover", x=x, y=y)["state"] == "done"
+    g = c.state()["grasp"]
+    assert g["stage"] == "hover" and np.hypot(*(np.array(g["block"]) - [x, y])) < 1e-9
+    t = tip(dash.m)
+    assert abs(t[2] - (-0.003 + 0.062)) < 0.006                                     # hovering about 6 cm above the table
+    aim_offset = np.hypot(t[0] - x, t[1] - y)
+    assert 0.004 < aim_offset < 0.014                                               # the tool point is aimed a few mm off the block's centre
+    assert run_stage(c, "lower")["state"] == "done"
+    assert abs(tip(dash.m)[2] - (-0.003 + 0.0185)) < 0.006                         # tool point a little below the block's mid-height
+    st = run_stage(c, "close")
+    assert st["state"] == "done" and "Holding a block" in st["message"], st
+    g = c.state()["grasp"]
+    assert g["stage"] == "closed" and g["hold_value"] == pytest.approx(49.4, abs=1.5)
+    assert dash.cmd["gripper"] == pytest.approx(g["hold_value"] - 1.5, abs=1.0)    # squeezed a little
+    z0 = tip(dash.m)[2]
+    assert run_stage(c, "lift")["state"] == "done" and tip(dash.m)[2] - z0 > 0.05
+    assert c.state()["grasp"]["stage"] == "lifted" and c.state()["grasp"]["next"] == ["putback"]
+    assert run_stage(c, "putback")["state"] == "done"
+    assert dash.m["gripper"] == pytest.approx(80.0, abs=1.5) and c.state()["grasp"]["stage"] == "hover"
+    assert dash.owner is None
+
+
+def test_closing_on_nothing_is_a_miss_and_the_gripper_opens_again():
+    dash, c, rest = grasp_rig(gripper_floor=10.7)
+    x, y = block_xy(rest)
+    run_stage(c, "open")
+    run_stage(c, "hover", x=x, y=y)
+    run_stage(c, "lower")
+    st = run_stage(c, "close")
+    assert st["state"] == "error" and "Missed" in st["message"]
+    assert dash.m["gripper"] == pytest.approx(80.0, abs=1.5)
+    g = c.state()["grasp"]
+    assert g["stage"] == "miss" and g["next"] == ["open"]
+
+
+def test_hover_needs_an_open_gripper_a_downward_pointing_tool_and_a_point_inside_the_calibrated_area():
+    dash, c, rest = grasp_rig()
+    x, y = block_xy(rest)
+    run_stage(c, "open")
+    with pytest.raises(MoveError, match="outside the area"):
+        c.grasp_action("hover", x=0.9, y=0.9)
+    with pytest.raises(MoveError, match="Click the block"):
+        c.grasp_action("hover")
+    tilted = {k: float(v) for k, v in POINTS[2]["joints"].items()}                  # far corner: the gripper leans about 50 degrees
+    dash2 = FakeDashboard(joints=tilted, gripper=80.0)
+    c2 = client(dash2)
+    c2.grasp = {"stage": "open", "pending": None}
+    with pytest.raises(MoveError, match="at least 65"):
+        c2.grasp_action("hover", x=block_xy(tilted)[0], y=block_xy(tilted)[1])
+    assert dash2.targets == []
+
+
+def test_hover_with_the_gripper_closed_is_refused():
+    dash, c, rest = grasp_rig()
+    c.grasp = {"stage": "open", "pending": None}                                    # pretend the open stage was done, the jaws are still closed
+    with pytest.raises(MoveError, match="Open the gripper"):
+        c.grasp_action("hover", x=block_xy(rest)[0], y=block_xy(rest)[1])
+
+
+def test_the_lowering_stops_if_a_joint_cannot_follow_its_command():
+    dash, c, rest = grasp_rig(gripper_floor=49.4)
+    x, y = block_xy(rest)
+    run_stage(c, "open")
+    run_stage(c, "hover", x=x, y=y)
+    dash.sag = {"shoulder_lift": 5.5}                                               # something resists: the joint rests 5.5 degrees behind
+    st = run_stage(c, "lower")
+    assert st["state"] == "error" and c.state()["grasp"]["stage"] == "hover" and dash.owner is None
+
+
+def test_stop_during_a_grasp_stage_halts_and_releases():
+    dash, c, rest = grasp_rig(gripper_floor=49.4)
+    x, y = block_xy(rest)
+    run_stage(c, "open")
+    c.settings.pause_s = c.mover.pause_s = 0.3
+    c.grasp_action("hover", x=x, y=y)
+    time.sleep(0.6)
+    c.stop()
+    finish(c, 30.0)
+    assert dash.stops >= 1 and dash.owner is None and c.state()["grasp"]["stage"] == "open"
+
+
+def test_a_refused_plain_move_does_not_reset_the_grasp_stage_but_a_started_one_does():
+    dash, c, rest = grasp_rig()
+    run_stage(c, "open")
+    assert c.state()["grasp"]["stage"] == "open"
+    with pytest.raises(MoveError, match="at least 3 cm"):
+        c.go_to_base(*block_xy(rest), 1.0)                                          # refused before anything starts
+    assert c.state()["grasp"]["stage"] == "open"
+    dash.m["gripper"] = 10.0                                                         # a plain move needs the gripper closed
+    dash.cmd["gripper"] = 10.0
+    c.go_to_base(*block_xy(rest), 3.0)
+    finish(c, 90.0)
+    assert c.state()["grasp"]["stage"] == "idle"
+
+
+def test_a_block_that_is_visibly_held_counts_as_gripped_even_if_the_close_step_ended_in_an_error():
+    """The controller dropped control during a close once ("Arm fault; holding the arm") although the jaws were holding the block."""
+    dash, c, rest = grasp_rig(gripper_floor=46.8)
+    x, y = block_xy(rest)
+    run_stage(c, "open")
+    run_stage(c, "hover", x=x, y=y)
+    run_stage(c, "lower")
+    assert c.state()["grasp"]["stage"] == "lower"
+    dash.cmd["gripper"] = 44.0
+    dash.m["gripper"] = 46.8                                                        # the jaws stalled on the block, the command is ahead
+    g = c.state()["grasp"]
+    assert g["stage"] == "closed" and g["hold_value"] == pytest.approx(46.8) and g["next"] == ["lift", "open"]
+    assert run_stage(c, "lift")["state"] == "done" and c.state()["grasp"]["stage"] == "lifted"
+
+
+def test_an_open_gripper_is_never_taken_for_a_held_block():
+    dash, c, rest = grasp_rig(gripper_floor=7.7)
+    c.grasp = {"stage": "lower", "pending": None}
+    dash.m["gripper"], dash.cmd["gripper"] = 79.0, 80.0
+    assert c.state()["grasp"]["stage"] == "lower"
+    dash.m["gripper"], dash.cmd["gripper"] = 10.7, 10.7                              # closed on nothing
+    assert c.state()["grasp"]["stage"] == "lower"
+    dash.m["gripper"], dash.cmd["gripper"] = 50.0, 50.0                              # a rest at a middle value with no push: not a grip
+    assert c.state()["grasp"]["stage"] == "lower"
+
+
+def test_a_block_held_when_the_agent_starts_is_recognised_so_lift_is_offered():
+    dash, c, rest = grasp_rig(gripper_floor=46.8)
+    assert c.state()["grasp"]["stage"] == "idle"
+    dash.cmd["gripper"], dash.m["gripper"] = 44.0, 46.8                              # holding a block from before the agent was restarted
+    g = c.state()["grasp"]
+    assert g["stage"] == "closed" and g["next"] == ["lift", "open"]
+
+
+def test_a_lift_that_does_not_raise_the_tip_is_an_error_and_a_sagging_lift_is_corrected():
+    sag = {"shoulder_lift": 4.0}
+    dash, c, rest = grasp_rig(gripper_floor=49.4, sag=sag)
+    x, y = block_xy(rest)
+    for action in ("open",):
+        run_stage(c, action)
+    run_stage(c, "hover", x=x, y=y)
+    run_stage(c, "lower")
+    run_stage(c, "close")
+    z0 = tip(dash.m)[2]
+    st = run_stage(c, "lift")
+    assert st["state"] == "done", st
+    assert tip(dash.m)[2] - z0 > 0.05                                               # the sag was compensated: it really rose about 3 cm
+    # a joint that cannot follow (stuck) leaves the tip where it is: the stage must fail, not say "lifted"
+    dash2, c2, rest2 = grasp_rig(gripper_floor=49.4)
+    x2, y2 = block_xy(rest2)
+    for action in ("open",):
+        run_stage(c2, action)
+    run_stage(c2, "hover", x=x2, y=y2)
+    run_stage(c2, "lower")
+    run_stage(c2, "close")
+    orig = dash2.__call__.__func__
+
+    def stuck(self_, method, path, body=None):
+        if path == "/api/target" and body["joint"] == "shoulder_lift" and body["value"] < dash2.cmd["shoulder_lift"]:
+            self_.cmd[body["joint"]] = body["value"]                                  # the command moves, the joint does not
+            return {}
+        return orig(self_, method, path, body)
+    import types
+    dash2.__call__ = types.MethodType(stuck, dash2)
+    c2.mover.http = lambda m, p, b=None: stuck(dash2, m, p, b)
+    c2.http = c2.mover.http
+    st2 = run_stage(c2, "lift")
+    assert st2["state"] == "error" and ("did not lift" in st2["message"] or "blocked" in st2["message"]), st2
+    assert c2.state()["grasp"]["stage"] == "closed"
+
+
+def test_a_wrist_bent_almost_to_its_limit_gets_a_clear_message_not_a_joint_limit_error():
+    rest0 = {k: float(v) for k, v in POINTS[0]["joints"].items()}
+    dash, c, rest = grasp_rig(limits={**LIMITS, "wrist_flex": [-95, rest0["wrist_flex"] + 2.0]})   # the wrist has only 2 degrees of room left
+    x, y = block_xy(rest)
+    run_stage(c, "open")
+    with pytest.raises(MoveError, match="Tilt the gripper back"):
+        c.grasp_action("hover", x=x, y=y)
+    assert dash.owner is None and c.state()["grasp"]["stage"] == "open"
+
+
+def test_the_saved_grasp_profiles_load_and_the_elite_one_aims_23_mm_behind_the_block_with_a_wide_opening():
+    from lauzkach_eye_robot_control.realarm import GraspSettings
+    path = str(Path(__file__).resolve().parents[1] / "grasp_profiles.json")
+    cur, elite = GraspSettings.from_profile(path, "current"), GraspSettings.from_profile(path, "sim_elite")
+    assert cur.pick_offset_m == pytest.approx(0.0084, abs=1e-4) and cur.open_value == 80.0 and cur.grasp_tip_m == pytest.approx(0.0185)
+    assert elite.pick_offset_m == pytest.approx(0.02303) and elite.open_value == 92.0 and elite.grasp_tip_m == pytest.approx(0.02867)
+    assert elite.profile == "sim_elite"
+    with pytest.raises(ValueError, match="no grasp profile"):
+        GraspSettings.from_profile(path, "nope")
+
+
+def test_the_elite_profile_runs_the_whole_staged_grasp_against_the_fake_controller():
+    from lauzkach_eye_robot_control.realarm import GraspSettings
+    path = str(Path(__file__).resolve().parents[1] / "grasp_profiles.json")
+    rest = {k: float(v) for k, v in POINTS[0]["joints"].items()}
+    dash = FakeDashboard(joints=rest, gripper=10.0, gripper_floor=49.4)
+    c = RealArmClient(dash, KIN, CAL, z_table=-0.003, settings=RealSettings(pause_s=0.0), grasp_settings=GraspSettings.from_profile(path, "sim_elite"))
+    x, y = block_xy(rest)
+    assert run_stage(c, "open")["state"] == "done" and dash.m["gripper"] == pytest.approx(92.0, abs=1.5)
+    assert run_stage(c, "hover", x=x, y=y)["state"] == "done"
+    t = tip(dash.m)
+    assert 0.018 < np.hypot(t[0] - x, t[1] - y) < 0.03                              # aimed about 23 mm off the block's centre
+    assert run_stage(c, "lower")["state"] == "done" and abs(tip(dash.m)[2] - (-0.003 + 0.02867)) < 0.006
+    assert run_stage(c, "close")["state"] == "done" and c.state()["grasp"]["profile"] == "sim_elite"

@@ -310,6 +310,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/drive/go":
                 result = self.service.go_click(envelope, float(body["px"]), float(body["py"]), float(body.get("height_cm", 3.0)),
                                                bool(body.get("closed_loop", False)), str(body.get("target", "sim")), bool(body.get("confirm_real", False)))
+            elif path == "/api/drive/grasp":
+                result = self.service.grasp(envelope, str(body["action"]), None if body.get("px") is None else float(body["px"]),
+                                            None if body.get("py") is None else float(body["py"]), bool(body.get("confirm_real", False)))
             elif path == "/api/drive/corner":
                 result = self.service.go_corner(envelope, int(body["index"]), float(body.get("height_cm", 3.0)), bool(body.get("closed_loop", False)),
                                                 str(body.get("target", "sim")), bool(body.get("confirm_real", False)))

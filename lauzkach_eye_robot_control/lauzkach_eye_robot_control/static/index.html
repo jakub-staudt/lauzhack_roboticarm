@@ -72,6 +72,18 @@
         <div><b>Click target</b><span id="target-text">Click inside the rectangle on the picture.</span></div>
         <button id="go-target" disabled>Move simulator here</button>
       </div>
+      <div id="grasp-card" class="drive-block grasp-card" hidden>
+        <div class="grasp-head"><b>Grasp a block (REAL arm), one supervised step at a time</b>
+          <span id="grasp-text">Click the block on the picture, then follow the steps in order. Keep Stop (Esc) ready.</span></div>
+        <div class="grasp-steps">
+          <button data-grasp="open">1 · Open gripper</button>
+          <button data-grasp="hover">2 · Hover over the clicked block</button>
+          <button data-grasp="lower">3 · Lower to grasp height</button>
+          <button data-grasp="close">4 · Grip</button>
+          <button data-grasp="lift">5 · Lift 6 cm</button>
+          <button data-grasp="putback">6 · Put back and release</button>
+        </div>
+      </div>
       <div class="drive-block">
         <div><b>Corners, step by step</b><span id="tour-text">Not started. Each press moves the simulated tip to the next corner.</span></div>
         <div class="drive-buttons"><button id="tour-prev" disabled>◀ Previous</button><button id="tour-next">Next corner ▶</button></div>

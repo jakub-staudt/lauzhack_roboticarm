@@ -95,3 +95,15 @@ def test_the_agent_holds_the_arm_if_the_laptop_goes_silent_during_a_move(rig):
 def test_an_unreachable_agent_is_a_clear_error_not_a_hang():
     with pytest.raises(RuntimeError, match="not reachable"):
         RemoteRealClient("http://127.0.0.1:9", TOKEN, timeout_s=1).state()
+
+
+def test_a_grasp_step_goes_through_the_agent_and_the_stage_comes_back_in_the_state(rig):
+    dash, client, remote, _ = rig
+    client.mover.min_height_m = None                           # not the point of this test
+    client.grasp = {"stage": "idle", "pending": None}
+    assert remote.state()["grasp"]["next"] == ["open"]
+    with pytest.raises(RuntimeError, match="Not now"):
+        remote.grasp_action("lower")
+    remote.grasp_action("open")
+    assert wait_done(remote) == "done"
+    assert remote.state()["grasp"]["stage"] == "open" and dash.m["gripper"] == pytest.approx(80.0, abs=1.5)

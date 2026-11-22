@@ -411,3 +411,37 @@ function renderProgress() {
 const _renderDrive = renderDrive;
 renderDrive = function () { _renderDrive(); renderProgress(); };
 renderProgress();
+
+
+// The staged real grasp: each button is one step; the agent says which steps are allowed next.
+const GRASP_TEXT = {
+  open: 'Open the gripper to 80 (a 73 mm gap). The arm does not move.',
+  hover: 'Move the gripper to about 6 cm above the block you clicked, with the open jaws straddling it.',
+  lower: 'Lower the open gripper straight down to the height of the block\'s centre, in 1 cm steps. It stops if anything resists.',
+  close: 'Close the gripper slowly until it stalls on the block.',
+  lift: 'Lift the block 6 cm straight up.',
+  putback: 'Lower the block back, open the gripper and rise clear.',
+};
+function renderGrasp() {
+  const card = $('grasp-card');
+  const real = (drive && drive.real) || {}, g = real.grasp;
+  card.hidden = !(realSelected() && g);
+  if (card.hidden) return;
+  const busy = driveBusy(), allowed = new Set(g.next || []);
+  $('grasp-text').textContent = `Stage: ${g.stage}.` + (g.hold_value ? ` Jaws stalled at ${g.hold_value.toFixed(1)}.` : '') + (g.last ? ` ${g.last}` : '') + (g.block ? '' : ' Click the block on the picture first.');
+  card.querySelectorAll('button[data-grasp]').forEach(b => {
+    const a = b.dataset.grasp;
+    b.disabled = busy || !allowed.has(a) || (a === 'hover' && !target) || !real.connected;
+    b.classList.toggle('next', !b.disabled && a !== 'open');
+  });
+}
+document.querySelectorAll('#grasp-card button[data-grasp]').forEach(b => b.addEventListener('click', async () => {
+  const action = b.dataset.grasp;
+  if (!confirm(`REAL ARM: ${GRASP_TEXT[action]}\n\nWatch the gripper camera and keep Stop (Esc) ready. Continue?`)) return;
+  const body = {action, confirm_real: true};
+  if (action === 'hover') { body.px = target.px; body.py = target.py; }
+  await drivePost('/api/drive/grasp', body, `Grasp step: ${action}`);
+}));
+const _renderDrive2 = renderDrive;
+renderDrive = function () { _renderDrive2(); renderGrasp(); };
+renderGrasp();

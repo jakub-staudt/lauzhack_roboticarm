@@ -105,6 +105,18 @@ def make_handler(agent: AgentState):
                     return self._send(200, agent.client.stop())
                 except Exception as exc:
                     return self._send(502, {"error": str(exc)})
+            if self.path == "/grasp":
+                try:
+                    action = str(body["action"])
+                    x = None if body.get("x") is None else float(body["x"])
+                    y = None if body.get("y") is None else float(body["y"])
+                except (KeyError, TypeError, ValueError):
+                    return self._send(400, {"error": "action (and x, y for hover) are required"})
+                with agent.lock:
+                    try:
+                        return self._send(200, agent.client.grasp_action(action, x, y))
+                    except RuntimeError as exc:
+                        return self._send(409, {"error": str(exc)})
             if self.path == "/go":
                 try:
                     x, y, h = float(body["x"]), float(body["y"]), float(body["height_cm"])
@@ -135,20 +147,23 @@ def main() -> None:
     ap.add_argument("--deadman-seconds", type=float, default=4.0)
     ap.add_argument("--pause-s", type=float, default=0.35)
     ap.add_argument("--max-step-deg", type=float, default=3.0)
+    ap.add_argument("--grasp-profiles", default=str(Path(__file__).resolve().parents[1] / "grasp_profiles.json"), help="JSON with the grasp settings profiles")
+    ap.add_argument("--grasp-profile", default="sim_elite", help="which profile the staged grasp uses (current, sim_elite)")
     args = ap.parse_args()
 
     from robotic_arm.clickmove import pooled_http          # the arm's kinematics: soarm_lab must be importable
     from soarm_lab.kinematics import RobotKinematics
     from soarm_lab.robot import load_robot
 
-    from lauzkach_eye_robot_control.realarm import RealArmClient, RealSettings
+    from lauzkach_eye_robot_control.realarm import GraspSettings, RealArmClient, RealSettings
 
     points, z_table = load_config(args.config)
     token = Path(args.token_file).read_text().strip()
     if len(token) < 16:
         raise SystemExit("the token must be at least 16 characters")
     client = RealArmClient(pooled_http(args.controller), RobotKinematics(load_robot()), points, z_table,
-                           RealSettings(pause_s=args.pause_s, max_step_deg=args.max_step_deg), label="Camera drive (server agent)")
+                           RealSettings(pause_s=args.pause_s, max_step_deg=args.max_step_deg), label="Camera drive (server agent)",
+                           grasp_settings=GraspSettings.from_profile(args.grasp_profiles, args.grasp_profile))
     agent = AgentState(client, token, args.deadman_seconds)
     stop = threading.Event()
     threading.Thread(target=agent.watchdog, args=(stop,), daemon=True, name="deadman").start()
