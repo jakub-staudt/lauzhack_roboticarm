@@ -30,8 +30,10 @@ class DriveService:
     def __init__(self, matrix_source: Callable[[], list[list[float]] | None], robot_map: RobotMap | None, sim: SimClient,
                  faces: str = "up", deadman_s: float = 3.0, guard: CommandGuard | None = None,
                  closed_loop: tuple[servo.Mover, servo.Observer] | None = None, servo_config: servo.ServoConfig | None = None,
-                 sim_calibration_error: tuple[float, float] = (0.0, 0.0), real=None) -> None:
+                 sim_calibration_error: tuple[float, float] = (0.0, 0.0), real=None, wrist_fetch=None) -> None:
         self._matrix_source, self.robot_map, self.sim = matrix_source, robot_map, sim
+        self.wrist_fetch = wrist_fetch                           # () -> the gripper camera picture (BGR), or None
+        self.watcher = None
         self.real = real                                          # the REAL arm (RealArmClient), or None: off unless the server was told to
         self.closed_loop, self.servo_config = closed_loop, servo_config or servo.ServoConfig()
         self.sim_error = sim_calibration_error                    # demo only: the simulated board differs from the arm's coordinates by this
@@ -135,7 +137,7 @@ class DriveService:
             st = self.real.state()
         except (RuntimeError, OSError, KeyError) as exc:
             return {"available": True, "connected": False, "error": str(exc)}
-        out = {"available": True, "connected": st["connected"], "task": st["task"], "tip_base": st["tip_base"], "owner": st["owner"],
+        out = {"available": True, "vision": None if self.watcher is None else dict(self.watcher.status), "connected": st["connected"], "task": st["task"], "tip_base": st["tip_base"], "owner": st["owner"],
                "emergency_stop": st["emergency_stop"], "gripper": st["gripper"],
                "height_guard": bool(st.get("height_guard")), "grasp": st.get("grasp")}
         if self.robot_map is not None and matrix is not None:
@@ -223,7 +225,7 @@ class DriveService:
         return self._move_closed(env, u, v, height_cm, label) if closed_loop else self._move(env, u, v, height_cm, label, real)
 
     def grasp(self, env: dict, action: str, px: float | None = None, py: float | None = None, confirm_real: bool = False,
-              box: list | None = None, park_after: bool = False) -> dict:
+              box: list | None = None, park_after: bool = False, colour: str | None = None) -> dict:
         """One stage of the supervised real grasp (open, hover, lower, close, lift, putback). The agent enforces the order and the safety checks."""
         duplicate = self._admit(env)
         if duplicate:
@@ -251,6 +253,12 @@ class DriveService:
         except RuntimeError as exc:
             self._note(f"The real arm refused the grasp step '{action}': {exc}")
             raise ApiError(409, str(exc), "real_refused") from exc
+        if action == "lower" and colour and self.wrist_fetch is not None:
+            from lauzkach_eye_robot_control.lower_watch import LowerWatcher
+            real = self.real
+            self.watcher = LowerWatcher(colour, self.wrist_fetch, lambda: real.state()["task"]["state"] in ("planning", "running"),
+                                        lambda: real.grasp_action("lower_stop"), self._note).start()
+            self._note(f"Watching the gripper camera for the {colour} block's edge to reach the bottom of the picture while lowering.")
         answer = {"action": action, "real": True, "task": result}
         self.guard.record(env.get("cid"), answer)
         self._note(f"Grasp step '{action}' started on the REAL arm" + (f" for the block at x {x * 100:.1f}, y {y * 100:.1f} cm." if x is not None else "."))

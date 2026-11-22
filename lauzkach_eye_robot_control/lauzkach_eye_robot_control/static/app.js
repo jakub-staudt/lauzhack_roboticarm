@@ -434,6 +434,8 @@ function renderGrasp() {
   card.hidden = !(realSelected() && g);
   if (card.hidden) return;
   const busy = driveBusy(), allowed = new Set([...(g.next || []), ...(g.extra || [])]);
+  const vis = real.vision;
+  $('vision-text').textContent = vis ? `Gripper camera while lowering (${vis.colour}): ${vis.state}${vis.bottom_px != null ? `; the block's lower edge is at ${vis.bottom_px} of ${vis.height_px} px` : ''}.` : '';
   $('park-text').textContent = g.park ? `Park position saved: tip at x ${g.park.tip_cm[0]}, y ${g.park.tip_cm[1]}, height ${g.park.tip_cm[2]} cm.` : 'No park position saved yet.';
   $('grasp-text').textContent = `Stage: ${g.stage}.` + (g.hold_value ? ` Jaws stalled at ${g.hold_value.toFixed(1)}.` : '') + (g.last ? ` ${g.last}` : '') + (g.block ? '' : ' Click the block on the picture first.');
   card.querySelectorAll('button[data-grasp]').forEach(b => {
@@ -447,6 +449,7 @@ document.querySelectorAll('#grasp-card button[data-grasp]').forEach(b => b.addEv
   if (!confirm(`REAL ARM: ${GRASP_TEXT[action]}\n\nWatch the gripper camera and keep Stop (Esc) ready. Continue?`)) return;
   const body = {action, confirm_real: true};
   if (action === 'putback' && $('park-after').checked) body.park_after = true;
+  if (action === 'lower' && target && target.block) body.colour = target.block.colour;   // the camera watches this colour while lowering
   if (action === 'hover') { body.px = target.px; body.py = target.py; if (target.block && target.block.box_px) body.box = target.block.box_px; }
   await drivePost('/api/drive/grasp', body, `Grasp step: ${action}`);
 }));

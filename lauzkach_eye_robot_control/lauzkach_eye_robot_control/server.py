@@ -321,7 +321,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/drive/grasp":
                 result = self.service.grasp(envelope, str(body["action"]), None if body.get("px") is None else float(body["px"]),
                                             None if body.get("py") is None else float(body["py"]), bool(body.get("confirm_real", False)),
-                                            body.get("box"), bool(body.get("park_after", False)))
+                                            body.get("box"), bool(body.get("park_after", False)), body.get("colour"))
             elif path == "/api/drive/corner":
                 result = self.service.go_corner(envelope, int(body["index"]), float(body.get("height_cm", 3.0)), bool(body.get("closed_loop", False)),
                                                 str(body.get("target", "sim")), bool(body.get("confirm_real", False)))
@@ -345,6 +345,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--camera", default=DEFAULT_CAMERA, help="MJPEG stream of the overhead camera (read-only GET)")
+    ap.add_argument("--wrist-snapshot", default="http://100.85.56.14:8780/cameras/wrist.jpg", help="one gripper-camera picture (read-only GET); used to watch the block while lowering")
     ap.add_argument("--wrist-camera", default=DEFAULT_WRIST, help="MJPEG stream of the gripper (first-person) camera; empty to turn it off")
     ap.add_argument("--image", help="use this picture instead of the camera")
     ap.add_argument("--host", default="127.0.0.1")
@@ -396,8 +397,13 @@ def main() -> None:
         print("*** REAL ARM ENABLED: the five buttons can move the physical arm (hover >= 3 cm, slow, each move confirmed). Keep Stop (Esc) ready. ***")
     Handler.wrist_url = args.wrist_camera
     Handler.sim_page = args.simulator.rstrip("/") + "/"
+    def wrist_fetch():
+        with urllib.request.urlopen(args.wrist_snapshot, timeout=3) as r:
+            return decode(r.read())
+
     Handler.service = DriveService(Handler.analyzer.locked_matrix, robot_map, sim_client, faces=args.robot_faces,
-                                   deadman_s=args.deadman_seconds, closed_loop=closed_loop, sim_calibration_error=demo_error, real=real)
+                                   deadman_s=args.deadman_seconds, closed_loop=closed_loop, sim_calibration_error=demo_error, real=real,
+                                   wrist_fetch=wrist_fetch if args.wrist_snapshot else None)
     Handler.service.start()
     Handler.analyzer.start()
     server = ThreadingHTTPServer((args.host, args.port), Handler)

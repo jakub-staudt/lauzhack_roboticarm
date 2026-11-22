@@ -138,12 +138,14 @@ class PacedMover(Mover):
     def beat(self, token: str) -> None:
         self.http("POST", "/api/control/heartbeat", {"token": token})
 
-    def run_waypoints(self, token: str, waypoints: list[Waypoint], phase: str = "", trim_last: bool = False) -> None:
+    def run_waypoints(self, token: str, waypoints: list[Waypoint], phase: str = "", trim_last: bool = False, stop_event=None) -> bool:
         """Execute waypoints in order (blocking), with the height guard and sag handling of a normal move. `trim_last`: after the last
         waypoint, look at the MEASURED tip and push the command until the tip really is there (gravity sag at full reach)."""
         self._armed = False
         with ThreadPoolExecutor(max_workers=len(ARM)) as pool:
             for i, wp in enumerate(waypoints):
+                if stop_event is not None and stop_event.is_set():           # an outside check says: that is far enough
+                    return True
                 self._check()
                 self._set(step=phase or wp.name, index=i, total=len(waypoints))
                 list(pool.map(lambda j: self.http("POST", "/api/target", {"token": token, "joint": j, "value": wp.joints[j]}), ARM))
@@ -157,6 +159,7 @@ class PacedMover(Mover):
         if trim_last and waypoints:
             self._trim(token, waypoints[-1], tries=4, tol=0.004, limit=0.05)
             self._guard_height(final=True)
+        return stop_event is not None and stop_event.is_set()
 
     def _run(self, token: str, waypoints: list[Waypoint]) -> None:
         try:
@@ -385,6 +388,7 @@ class RealArmClient:
         self._token: str | None = None
         self._lock = threading.Lock()
         self.gs = grasp_settings or GraspSettings()
+        self._enough = threading.Event()                          # set by the camera watcher: the gripper is low enough, stop lowering
         self.park_path = park_path
         self.park: dict | None = None
         if park_path and Path(park_path).exists():
@@ -524,7 +528,7 @@ class RealArmClient:
                "closed": ["lift", "open"], "lifted": ["putback"], "miss": ["open"]}.get(g["stage"], ["open"])
         extra = ["set_park"] + (["park"] if self.park and g["stage"] not in ("closed", "lifted") else [])
         park = None if not self.park else {"joints": {k: round(v, 1) for k, v in self.park["joints"].items()}, "tip_cm": self.park.get("tip_cm")}
-        return {"stage": g["stage"], "profile": self.gs.profile, "next": nxt, "extra": extra, "park": park, "block": g.get("block"), "hold_value": g.get("hold"), "last": g.get("last", "")}
+        return {"stage": g["stage"], "profile": self.gs.profile, "next": nxt, "extra": extra, "park": park, "visual": g.get("visual"), "block": g.get("block"), "hold_value": g.get("hold"), "last": g.get("last", "")}
 
     def _settle_stage(self) -> None:
         """A stage counts only when its job finished successfully; an error leaves the previous stage in place."""
@@ -541,6 +545,11 @@ class RealArmClient:
 
     def grasp_action(self, action: str, x: float | None = None, y: float | None = None, yaw: float | None = None,
                      park_after: bool = False) -> dict:
+        if action == "lower_stop":                                          # from the camera watcher: legal only while lowering
+            if not self.mover.busy():
+                raise MoveError("The arm is not lowering.")
+            self._enough.set()
+            return {"state": "stopping"}
         self._settle_stage()
         if self.mover.busy():
             raise MoveError("The arm is still moving. Wait for it to finish.")
@@ -792,16 +801,22 @@ class RealArmClient:
         dz = (self.z_table + gs.grasp_tip_m) - tip_z
         if dz > -0.004:
             raise MoveError("The gripper is already at grasp height.")
-        wps = self._vertical_waypoints(measured, dz, floor)
+        wps = _vertical(self.kin, ClickSettings(gripper_max=1e9), measured, dz, floor, 0.005)       # 5 mm steps: the camera can stop it early
         self._check_limits(wps, (state.get("cartesian") or {}).get("joint_limits", {}).get("effective"))
 
         def job(token: str) -> None:
             saved = (self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s)
-            self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = self.z_table + gs.lower_min_height_m, gs.lower_max_sag_deg, 0.4
+            self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = self.z_table + gs.lower_min_height_m, gs.lower_max_sag_deg, 0.3
+            self._enough.clear()
             try:
-                self.mover.run_waypoints(token, wps, "lowering to grasp height", trim_last=True)
+                early = self.mover.run_waypoints(token, wps, "lowering to grasp height", trim_last=True, stop_event=self._enough)
             finally:
                 self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = saved
+            now = self.http("GET", "/api/state", None)
+            z = float(self.kin.tcp({k: float(v) for k, v in now["measured"].items()})[2, 3]) - self.z_table
+            self.grasp["visual"] = "edge reached" if early else "not confirmed by the camera"
+            self.mover._set(message=(f"Lowered enough: the camera saw the block's edge reach the bottom of its picture (tool {z * 100:.1f} cm above the table)."
+                                     if early else f"Lowered to grasp height ({z * 100:.1f} cm above the table); the camera did not confirm it."))
         return self._launch_job("lower to grasp height", job, ("lower", {}))
 
     def _grasp_lift(self, state: dict, measured: dict[str, float], floor) -> dict:

@@ -658,3 +658,33 @@ def test_park_is_refused_while_the_jaws_hold_a_block_and_after_putting_back_the_
     assert st["state"] == "done" and "park position" in st["message"], st
     assert all(abs(dash.m[j] - PARK_JOINTS[j]) < 1.0 for j in PARK_JOINTS)
     assert dash.m["gripper"] == pytest.approx(92.0, abs=1.5) or dash.m["gripper"] > 70
+
+
+def test_lower_stop_ends_the_descent_early_and_the_state_says_the_camera_confirmed_it():
+    dash, c, rest = grasp_rig(gripper_floor=49.4)
+    x, y = block_xy(rest)
+    run_stage(c, "open")
+    run_stage(c, "hover", x=x, y=y)
+    c.settings.pause_s = c.mover.pause_s = 0.3
+    z_start = tip(dash.m)[2]
+    c.grasp_action("lower")
+    time.sleep(1.0)
+    assert c.grasp_action("lower_stop")["state"] == "stopping"
+    finish(c, 60.0)
+    st = c.mover.status()
+    assert st["state"] == "done" and "camera saw" in st["message"], st
+    g = c.state()["grasp"]
+    assert g["stage"] == "lower" and g["visual"] == "edge reached"
+    assert tip(dash.m)[2] < z_start - 0.004 and tip(dash.m)[2] > -0.003 + c.gs.grasp_tip_m + 0.004     # it went down some, not all the way
+
+
+def test_lowering_to_grasp_height_without_a_camera_stop_says_the_camera_did_not_confirm_it():
+    dash, c, rest = grasp_rig(gripper_floor=49.4)
+    x, y = block_xy(rest)
+    run_stage(c, "open")
+    run_stage(c, "hover", x=x, y=y)
+    st = run_stage(c, "lower")
+    assert st["state"] == "done" and "did not confirm" in st["message"]
+    assert c.state()["grasp"]["visual"] == "not confirmed by the camera"
+    with pytest.raises(MoveError, match="not lowering"):
+        c.grasp_action("lower_stop")
