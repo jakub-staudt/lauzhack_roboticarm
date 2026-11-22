@@ -579,8 +579,8 @@ class RealArmClient:
                 self.mover.beat(token)
                 return True
             except MoveError:
-                measured, command = self._gripper_state()
-                if measured >= gs.hold_min and measured - command >= 1.0:
+                measured, _ = self._gripper_state()
+                if gs.hold_min <= measured <= gs.open_value - 15:               # after the fault the controller resets its command to the reading
                     self.grasp["pending"] = ("closed", {"hold": measured})
                     self.mover._set(message=f"Holding a block: the jaws stalled at {measured:.1f}. (The controller released control; the grip holds.)")
                     return False
@@ -668,6 +668,21 @@ class RealArmClient:
     def _vertical_waypoints(self, measured: dict[str, float], dz: float, floor) -> list[Waypoint]:
         return _vertical(self.kin, ClickSettings(gripper_max=1e9), measured, dz, floor, 0.01)
 
+    def _nudge_tilted(self, joints: dict[str, float], dz: float, floor, delta_deg: float) -> Waypoint:
+        """One step straight up while the gripper tilts back by `delta_deg` (the wrist unbends, which gives the arm room to rise)."""
+        if delta_deg == 0.0:
+            return plan_nudge(self.kin, ClickSettings(gripper_max=1e9), joints, dz, floor)[0]
+        rot = np.array(self.kin.tcp({**joints, "wrist_flex": joints["wrist_flex"] - delta_deg})[:3, :3])
+        tip = np.array(self.kin.tcp(joints)[:3, 3], float)
+        goal = tip + np.array([0.0, 0.0, dz])
+        sol = self.kin.ik(goal, rot, seed=joints, tol=ClickSettings().ik_tol_m)
+        if not sol.ok or sol.rot_err > ClickSettings().max_rot_err_rad:
+            raise MoveError("no tilted solution")
+        new = {j: float(sol.joints[j]) for j in ARM}
+        if any(not self.kin.spec.limits[j][0] <= new[j] <= self.kin.spec.limits[j][1] for j in ARM) or max(abs(new[j] - joints[j]) for j in ARM) > 35.0:
+            raise MoveError("no tilted solution")
+        return Waypoint("up", [float(c) for c in goal], new)
+
     def _vertical_max(self, measured: dict[str, float], dz_max: float, floor, limits: dict | None, min_dz: float) -> tuple[list[Waypoint], float]:
         """Straight up in 1 cm steps, as far as the arm can go (up to dz_max) without leaving the joint limits (3 degrees of margin).
         Raises if it cannot reach min_dz."""
@@ -675,11 +690,17 @@ class RealArmClient:
         joints, total, click = dict(measured), 0.0, ClickSettings(gripper_max=1e9)
         while total < dz_max - 0.001:
             step = min(0.01, dz_max - total)
-            try:
-                wp = plan_nudge(self.kin, click, joints, step, floor)[0]
-            except MoveError:
+            wp = None
+            for delta in (0.0, 2.0, 4.0, 6.0, 8.0, 10.0):                    # keep the tilt if possible, else tilt back a little as it rises
+                try:
+                    cand = self._nudge_tilted(joints, step, floor, delta)
+                except MoveError:
+                    continue
+                if limits and any(not limits[j][0] + 3.0 <= cand.joints[j] <= limits[j][1] - 3.0 for j in ARM):
+                    continue
+                wp = cand
                 break
-            if limits and any(not limits[j][0] + 3.0 <= wp.joints[j] <= limits[j][1] - 3.0 for j in ARM):
+            if wp is None:
                 break
             out.append(wp)
             joints = {**joints, **wp.joints}
@@ -726,14 +747,19 @@ class RealArmClient:
             if held < gs.hold_min - 6:
                 self.grasp.update(stage="miss", pending=None)
                 raise MoveError(f"The block was lost during the lift (the jaws read {held:.0f}).")
-            self.grasp["pending"] = ("lifted", {"lifted_dz": rose})
+            path = [{j: float(measured[j]) for j in ARM}] + [dict(wp.joints) for wp in wps]       # remembered so Put back can retrace it exactly
+            self.grasp["pending"] = ("lifted", {"lifted_dz": rose, "lift_path": path})
             self.mover._set(message=f"Lifted the block {rose * 100:.1f} cm.")
         return self._launch_job("lift the block", job, None)
 
     def _grasp_putback(self, measured: dict[str, float], floor) -> dict:
         gs = self.gs
         dz = float(self.grasp.get("lifted_dz") or gs.lift_m)
-        down = self._vertical_waypoints(measured, -dz, floor)
+        path = self.grasp.get("lift_path")
+        if path and len(path) > 1:                                          # retrace the lift (it tilted the gripper back as it rose)
+            down = [Waypoint("down", [float(c) for c in self.kin.tcp({**measured, **j})[:3, 3]], dict(j)) for j in reversed(path[:-1])]
+        else:
+            down = self._vertical_waypoints(measured, -dz, floor)
 
         def job(token: str) -> None:
             saved = (self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s)

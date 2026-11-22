@@ -504,22 +504,27 @@ def test_the_lift_goes_as_high_as_the_arm_can_and_put_back_lowers_by_what_was_li
     st = run_stage(c, "lift")
     assert st["state"] == "done", st
     rose = tip(dash.m)[2] - z0
-    assert 0.025 <= rose < 0.30 and c.state()["grasp"]["stage"] == "lifted"
+    assert 0.025 <= rose <= 0.30 and c.state()["grasp"]["stage"] == "lifted"
     assert c.grasp["lifted_dz"] == pytest.approx(rose, abs=0.004)
     assert run_stage(c, "putback")["state"] == "done"
     assert tip(dash.m)[2] - z0 > 0.01 and dash.m["gripper"] == pytest.approx(80.0, abs=1.5)      # put down, released, and risen clear
 
 
-def test_a_lift_that_cannot_reach_2_5_cm_says_so_clearly():
+def test_a_lift_with_the_wrist_nearly_at_its_limit_tilts_the_gripper_back_and_still_rises():
     dash, c, rest = grasp_rig(gripper_floor=49.4)
     x, y = block_xy(rest)
     for action, kw in (("open", {}), ("hover", dict(x=x, y=y)), ("lower", {}), ("close", {})):
         run_stage(c, action, **kw)
     now = {k: float(v) for k, v in dash.m.items()}
-    dash.limits = {**LIMITS, "wrist_flex": [-95, now["wrist_flex"] + 4.0]}              # the wrist has only 4 degrees of room left now
-    with pytest.raises(MoveError, match="nearer the base"):
-        c.grasp_action("lift")
-    assert c.state()["grasp"]["stage"] == "closed" and dash.owner is None
+    top = now["wrist_flex"] + 5.0                                                   # the wrist has only 5 degrees of room left (3 of them are the margin)
+    dash.limits = {**LIMITS, "wrist_flex": [-95, top]}
+    z0 = tip(dash.m)[2]
+    st = run_stage(c, "lift")
+    assert st["state"] == "done", st
+    assert tip(dash.m)[2] - z0 >= 0.025 and dash.m["wrist_flex"] <= top - 2.9      # it rose, and the wrist stayed inside its limit with margin
+    approach0, _ = KIN.tool_axes(now)
+    approach1, _ = KIN.tool_axes({k: float(v) for k, v in dash.m.items()})
+    assert approach1[2] > approach0[2]                                              # the gripper tilted back (less straight down)
 
 
 def test_control_dropped_by_the_controller_right_after_the_jaws_stall_still_counts_as_a_grip():
