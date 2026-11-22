@@ -639,50 +639,6 @@ Make sure the simulator or the intended backend is running before launching the 
 
 ---
 
-# Safety and Reliability
-
-Remote robotic manipulation requires explicit safety mechanisms.
-
-REACHA incorporates several design principles to reduce the risk of unintended movement.
-
-### Movement authorization
-
-Movement commands are separated from gaze selection.
-
-The system can require explicit confirmation before executing a manipulation task, preventing accidental selections from immediately triggering physical actions.
-
-### Emergency stop
-
-The interface provides a STOP mechanism to interrupt ongoing movement.
-
-The system also supports movement cancellation and control release.
-
-### Control ownership
-
-Only one application should hold control of the robotic arm at a time.
-
-The control infrastructure uses ownership and heartbeat mechanisms to prevent conflicting commands.
-
-### Motion constraints
-
-The robotic planner accounts for:
-
-- Joint limits.
-- Workspace boundaries.
-- Reachability.
-- Safe approach heights.
-- Feasible inverse kinematics solutions.
-
-### Remote operation
-
-Network latency and intermittent connectivity are considered in the control architecture.
-
-The system should never be operated without appropriate physical supervision and access to the hardware emergency stop.
-
-**REACHA is a research and hackathon prototype, not a certified medical or assistive device. It is not intended to replace professional assistive technology or clinical evaluation.**
-
----
-
 # Future Development
 
 REACHA establishes a foundation for more advanced gaze-controlled robotic interaction.
