@@ -23,7 +23,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from robotic_arm.clickmove import ClickSettings, ImagePlane, MoveError, Mover, Waypoint, plan_click, plan_nudge
-from robotic_arm.planner import ARM
+import math
+
+import numpy as np
+
+from robotic_arm.planner import ARM, tool_rotation
 
 
 @dataclass
@@ -108,6 +112,68 @@ def _joint_glide(kin, settings: ClickSettings, joints: dict[str, float], target_
         raise MoveError(f"Moving between those two spots would dip the tip to {min(heights) * 100:.1f} cm (limit {min_height_m * 100:.1f} cm); "
                         "refused. Go through a corner in between.")
     return [goal]
+
+
+def _interpolate(kin, a: dict[str, float], b: dict[str, float], n: int) -> tuple[list[dict[str, float]], float]:
+    """n joint-space points from a (exclusive) to b (inclusive), and the lowest tip height along them (cheap forward kinematics)."""
+    pts = [{j: a[j] + (b[j] - a[j]) * i / n for j in ARM} for i in range(1, n + 1)]
+    lowest = min(float(kin.tcp({**a, **p})[2, 3]) for p in pts)
+    return pts, lowest
+
+
+def plan_hover_fast(kin, settings: ClickSettings, start: dict[str, float], target_xy: tuple[float, float], z_table: float,
+                    z_floor: float | None, hover_m: float, max_step_deg: float = 3.0) -> list[Waypoint]:
+    """Same route as `plan_hover` (rise, glide at the glide height, straight down) but with THREE inverse-kinematics solves instead
+    of one per centimetre: IK only at the corners of the route, joint-space interpolation between them, and a cheap forward-kinematics
+    check that the tip never dips below the allowed height on the way. Raises MoveError if any check fails (the caller then falls
+    back to the slow, line-by-line planner)."""
+    z_above, z_hover = z_table + settings.above_m, z_table + hover_m
+    pose0 = kin.tcp(start)
+    tip0, R0 = np.array(pose0[:3, 3], float), np.array(pose0[:3, :3])
+    th0 = math.atan2(tip0[1], tip0[0])
+    tx, ty = target_xy
+    low_ok = max(z_hover - 0.005, (z_floor + 0.001) if z_floor is not None else -1.0)          # nothing below this, ever
+
+    def keep(p):
+        a = math.atan2(p[1], p[0]) - th0
+        c, sn = math.cos(a), math.sin(a)
+        return np.array([[c, -sn, 0], [sn, c, 0], [0, 0, 1]]) @ R0
+
+    orientations = [keep] + [lambda p, pp=pp: tool_rotation(math.atan2(p[1], p[0]), pp) for pp in settings.pitches_deg]
+    reason = "no orientation worked"
+    for rotation in orientations:
+        stops: list[tuple[str, np.ndarray]] = []
+        if tip0[2] < z_above - 0.002:
+            stops.append(("rise", np.array([tip0[0], tip0[1], z_above])))
+        stops += [("glide", np.array([tx, ty, z_above])), ("hover", np.array([tx, ty, z_hover]))]
+        waypoints: list[Waypoint] = []
+        seed, here, ok = dict(start), dict(start), True
+        for name, p in stops:
+            sol = kin.ik(p, rotation(p) if name != "rise" else R0, seed=seed, tol=settings.ik_tol_m)
+            if not sol.ok or sol.rot_err > settings.max_rot_err_rad:
+                ok, reason = False, f"cannot reach the {name} point ({p[0]:.3f}, {p[1]:.3f}, {p[2]:.3f})"
+                break
+            goal = {j: float(sol.joints[j]) for j in ARM}
+            if any(not kin.spec.limits[j][0] <= goal[j] <= kin.spec.limits[j][1] for j in ARM):
+                ok, reason = False, f"the {name} point is outside a joint limit"
+                break
+            n = max(1, math.ceil(max(abs(goal[j] - here[j]) for j in ARM) / max_step_deg))
+            pts, lowest = _interpolate(kin, here, goal, n)
+            ctrl_floor = (z_floor + 0.001) if z_floor is not None else -1.0
+            if name == "rise":                                      # the arm may START low (resting on the board); it just must not dip further
+                floor_here = max(min(float(kin.tcp(here)[2, 3]), p[2]) - 0.01, ctrl_floor)
+            elif name == "hover":
+                floor_here = low_ok
+            else:                                                   # glide: stay near the glide height
+                floor_here = max(min(float(kin.tcp(here)[2, 3]), p[2]) - 0.01, low_ok)
+            if lowest < floor_here:
+                ok, reason = False, f"the {name} leg would dip the tip to {lowest * 100:.1f} cm (limit {floor_here * 100:.1f} cm)"
+                break
+            waypoints += [Waypoint(name, [float(c) for c in p], pt) for pt in pts]
+            here, seed = goal, {**seed, **sol.joints}
+        if ok:
+            return waypoints
+    raise MoveError(f"Fast planner: {reason}.")
 
 
 def plan_hover(kin, settings: ClickSettings, start: dict[str, float], target_xy: tuple[float, float], z_table: float,
@@ -205,7 +271,10 @@ class RealArmClient:
             raise MoveError(f"Someone else holds control ({(state.get('control') or {}).get('label')}). Release it in the manual page first.")
         measured, floor = self._preflight(state)
         limits = (state.get("cartesian") or {}).get("joint_limits", {}).get("effective")
-        waypoints = plan_hover(self.kin, self.mover.settings, measured, (x, y), self.z_table, floor, hover, s.max_step_deg)
+        try:
+            waypoints = plan_hover_fast(self.kin, self.mover.settings, measured, (x, y), self.z_table, floor, hover, s.max_step_deg)
+        except MoveError:                                           # a check failed: use the slow planner that goes line by line
+            waypoints = plan_hover(self.kin, self.mover.settings, measured, (x, y), self.z_table, floor, hover, s.max_step_deg)
         self._check_limits(waypoints, limits)
         token = self._claim()                                       # only now, and the first heartbeat goes out at once
         try:

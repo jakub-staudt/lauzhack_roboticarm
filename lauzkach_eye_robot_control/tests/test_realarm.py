@@ -190,3 +190,31 @@ def test_control_is_claimed_only_after_planning_and_a_heartbeat_follows_at_once(
     paths = [p for _, p in dash.calls]
     i = paths.index("/api/control/claim")
     assert paths[i + 1] == "/api/control/heartbeat" and "/api/target" not in paths[:i]
+
+
+def test_the_fast_planner_reaches_the_same_pose_as_the_slow_one_in_a_fraction_of_the_time_and_never_dips():
+    from robotic_arm.clickmove import ClickSettings
+
+    from lauzkach_eye_robot_control.realarm import plan_hover, plan_hover_fast
+    cs = ClickSettings(above_m=0.05, step_m=0.01)
+    start = {k: float(v) for k, v in POINTS[0]["joints"].items()}
+    x, y = corner(2)
+    t0 = time.time(); slow = plan_hover(KIN, cs, start, (x, y), -0.003, -0.0024, 0.03, 5.0); t_slow = time.time() - t0
+    t0 = time.time(); fast = plan_hover_fast(KIN, cs, start, (x, y), -0.003, -0.0024, 0.03, 5.0); t_fast = time.time() - t0
+    assert np.allclose(tip({**start, **fast[-1].joints}), tip({**start, **slow[-1].joints}), atol=0.002)
+    assert t_fast < t_slow / 3
+    previous = start
+    for w in fast:
+        assert max(abs(w.joints[j] - previous[j]) for j in w.joints) <= 5.0 + 1e-6
+        previous = w.joints
+    assert min(tip({**start, **w.joints})[2] for w in fast) > tip(start)[2] - 0.011     # never dips below where it started
+
+
+def test_the_fast_planner_refuses_a_path_that_would_dip_and_the_client_falls_back_to_the_slow_one(monkeypatch):
+    import lauzkach_eye_robot_control.realarm as ra
+    monkeypatch.setattr(ra, "plan_hover_fast", lambda *a, **k: (_ for _ in ()).throw(MoveError("forced")))
+    dash = FakeDashboard()
+    c = client(dash)
+    c.go_to_base(*corner(0), 3.0)
+    finish(c)
+    assert c.mover.status()["state"] == "done"

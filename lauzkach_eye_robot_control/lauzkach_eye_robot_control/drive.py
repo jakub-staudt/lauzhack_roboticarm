@@ -179,3 +179,38 @@ class SimError(RuntimeError):
     def __init__(self, message: str, status: int = 502) -> None:
         super().__init__(message)
         self.status = status
+
+
+class RemoteRealClient:
+    """The real arm reached through the ARM AGENT running next to it (see arm_agent.py). Same interface as `RealArmClient`.
+
+    One small request per command instead of a round trip per joint step, so link lag no longer slows the arm down."""
+
+    def __init__(self, url: str, token: str, timeout_s: float = 6.0) -> None:
+        if not url.startswith("http://"):
+            raise ValueError("the agent URL must be http://host:port")
+        self.url, self.token, self.timeout_s = url.rstrip("/"), token, timeout_s
+
+    def _call(self, path: str, body: dict | None = None) -> dict:
+        request = urllib.request.Request(self.url + path, data=None if body is None else json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json", "X-Agent-Token": self.token})
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+                return json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            try:
+                message = json.loads(exc.read()).get("error", "")
+            except ValueError:
+                message = ""
+            raise RuntimeError(message or f"the arm agent answered HTTP {exc.code}") from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise RuntimeError(f"the arm agent is not reachable at {self.url} ({type(exc).__name__})") from exc
+
+    def state(self) -> dict:
+        return self._call("/state")
+
+    def go_to_base(self, x: float, y: float, height_cm: float) -> dict:
+        return self._call("/go", {"x": x, "y": y, "height_cm": height_cm})
+
+    def stop(self) -> dict:
+        return self._call("/stop", {})

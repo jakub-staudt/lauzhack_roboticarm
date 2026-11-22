@@ -14,8 +14,8 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 h1 { font-size: 1.15rem; margin: 0; }
 h2 { font-size: .8rem; margin: 18px 0 8px; color: var(--muted); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
 h2:first-child { margin-top: 0; }
-main { display: grid; gap: 16px; padding: 0 16px 24px; max-width: 1280px; margin: 0 auto; }
-@media (min-width: 960px) { main { grid-template-columns: minmax(0, 1fr) 380px; align-items: start; } }
+main { display: grid; gap: 16px; padding: 0 16px 24px; max-width: none; margin: 0 auto; }
+@media (min-width: 960px) { main { grid-template-columns: minmax(0, 1fr) calc(380px + 10vw); align-items: start; } }   /* the right column: its old width plus 10% of the screen width */
 
 .chip { font-size: .85rem; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); }
 [data-tone="ok"].chip { color: var(--ok); border-color: var(--ok); }
@@ -71,6 +71,15 @@ button.stop { background: var(--bad-bg); color: var(--bad); border: 2px solid va
 .servo-log li.final { font-weight: 600; }
 .drive-log { list-style: none; margin: 6px 0 0; padding: 0; font-size: .8rem; color: var(--muted); display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+.pov { margin: 0 0 14px; }
+.sim-frame { position: relative; background: #000; border-radius: 10px; overflow: hidden; height: 560px; display: grid; place-items: center; }
+.sim-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
+.sim-frame p { color: #aaa; margin: 0; }
+.sim-frame iframe[hidden], .sim-frame p[hidden] { display: none; }
+.pov-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.pov-frame { position: relative; background: #000; border-radius: 10px; overflow: hidden; aspect-ratio: 4 / 3; display: grid; place-items: center; }
+.pov-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.pov-frame p { color: #aaa; margin: 0; }
 .crop { background: var(--idle-bg); border-radius: 10px; aspect-ratio: 1; display: grid; place-items: center; overflow: hidden; }
 .crop img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .crop p { margin: 0; color: var(--muted); }

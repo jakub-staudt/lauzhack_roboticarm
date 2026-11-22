@@ -76,6 +76,16 @@
   </section>
 
   <aside class="panel">
+    <section class="pov" id="pov-panel">
+      <div class="pov-head"><b>Gripper camera (first-person view)</b>
+        <label><input type="checkbox" id="pov-on" checked> show</label></div>
+      <div class="pov-frame"><img id="pov" alt="Live view from the camera on the gripper" draggable="false"><p id="pov-off" hidden>Gripper camera off.</p></div>
+    </section>
+  <section class="pov" id="sim-panel">
+      <div class="pov-head"><b>Simulator</b>
+        <label><input type="checkbox" id="sim-on" checked> show</label></div>
+      <div class="sim-frame"><iframe id="sim-view" title="The MuJoCo simulator" loading="lazy" referrerpolicy="no-referrer"></iframe><p id="sim-off" hidden>Simulator view off.</p></div>
+    </section>
     <h2>Cropped rectangle</h2>
     <div class="crop"><img id="crop" alt="The detected rectangle, straightened" hidden><p id="crop-empty">No rectangle yet.</p></div>
     <p class="hint">What the robot will see inside the rectangle, straightened to a square. Its corners are the green dots.</p>

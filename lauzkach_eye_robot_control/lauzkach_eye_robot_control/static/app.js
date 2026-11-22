@@ -334,3 +334,34 @@ let downPoint = null;
 overlay.addEventListener('pointerdown', e => { downPoint = [e.clientX, e.clientY]; });
 pollDrive();
 poll();
+
+
+// Gripper (first-person) camera: a live stream through this server; the checkbox stops it to save bandwidth on a laggy link.
+(function () {
+  const img = $('pov'), box = $('pov-on'), off = $('pov-off');
+  const apply = () => {
+    try { localStorage.setItem('pov-on', box.checked ? '1' : '0'); } catch (e) { /* storage may be blocked */ }
+    off.hidden = box.checked; img.hidden = !box.checked;
+    if (box.checked) img.src = '/wrist.mjpg?' + Date.now(); else img.removeAttribute('src');
+  };
+  try { if (localStorage.getItem('pov-on') === '0') box.checked = false; } catch (e) { /* ignore */ }
+  box.addEventListener('change', apply);
+  img.addEventListener('error', () => { if (box.checked) setTimeout(() => { if (box.checked) img.src = '/wrist.mjpg?' + Date.now(); }, 3000); });
+  apply();
+})();
+
+
+// The simulator's own page, embedded in the right column (same machine; the address comes from the server, set at start-up).
+(function () {
+  const frame = $('sim-view'), box = $('sim-on'), off = $('sim-off');
+  let url = '';
+  const apply = () => {
+    try { localStorage.setItem('sim-on', box.checked ? '1' : '0'); } catch (e) { /* ignore */ }
+    off.hidden = box.checked || !url; frame.hidden = !box.checked || !url;
+    if (box.checked && url && frame.getAttribute('src') !== url) frame.src = url;
+    if (!box.checked) frame.removeAttribute('src');
+  };
+  try { if (localStorage.getItem('sim-on') === '0') box.checked = false; } catch (e) { /* ignore */ }
+  box.addEventListener('change', apply);
+  fetch('/api/drive').then(r => r.json()).then(d => { url = d.sim_page || ''; if (!url) off.textContent = 'No simulator address configured.'; apply(); }).catch(() => { off.hidden = false; });
+})();
