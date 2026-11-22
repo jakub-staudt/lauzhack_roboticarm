@@ -5,7 +5,7 @@
 ![banner](assets/images/Reacha_Assistive_Robotics_Banner.webp)
 
 
-**Enabling independent robotic manipulation through eye tracking for people with motor disabilities.**
+**An eye-tracking-based robotic arm control system designed to enable people with paralysis to perform everyday object manipulation tasks through gaze interaction.**
 
 [![LauzHack 2026](https://img.shields.io/badge/Built_at-LauzHack_2026-009FB7?style=for-the-badge)](https://lauzhack.com/)
 [![Logitech Track](https://img.shields.io/badge/Track-Logitech-00B8FC?style=for-the-badge)](https://www.logitech.com/)
@@ -706,28 +706,10 @@ Potential benefits include improved spatial interaction, contextual object selec
 
 ---
 
-# Project Vision
-
-REACHA is built around a simple principle:
-
-**Physical limitations should not prevent people from interacting with the world around them.**
-
-By combining gaze-based interaction with accessible software and robotic manipulation, we explore how everyday physical tasks could become possible through alternative input methods.
-
-The current implementation focuses on a controlled pick-and-place environment, but the underlying concept has much broader potential.
-
-From assistive robotics to remote manipulation, REACHA represents a step towards more inclusive human–robot interaction.
-
----
-
 
 <div align="center">
 
 ### REACHA
-
-#### Assistive robotics for independence
-
-*Technology should adapt to people, not the other way around.*
 
 [Live Website](https://claude.ai/artifact/NsY2vBKaEEffSLKGwzH8wE) · [GitHub Repository](https://github.com/jakub-staudt/lauzhack_roboticarm)
 
