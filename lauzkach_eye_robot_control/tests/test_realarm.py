@@ -489,3 +489,53 @@ def test_the_elite_profile_runs_the_whole_staged_grasp_against_the_fake_controll
     assert 0.018 < np.hypot(t[0] - x, t[1] - y) < 0.03                              # aimed about 23 mm off the block's centre
     assert run_stage(c, "lower")["state"] == "done" and abs(tip(dash.m)[2] - (-0.003 + 0.02867)) < 0.006
     assert run_stage(c, "close")["state"] == "done" and c.state()["grasp"]["profile"] == "sim_elite"
+
+
+def test_the_lift_goes_as_high_as_the_arm_can_and_put_back_lowers_by_what_was_lifted():
+    from lauzkach_eye_robot_control.realarm import GraspSettings
+    rest = {k: float(v) for k, v in POINTS[0]["joints"].items()}
+    dash = FakeDashboard(joints=rest, gripper=10.0, gripper_floor=49.4)
+    c = client(dash)
+    c.gs = GraspSettings(lift_m=0.30)                                                # far more than any arm can lift at this reach
+    x, y = block_xy(rest)
+    for action, kw in (("open", {}), ("hover", dict(x=x, y=y)), ("lower", {}), ("close", {})):
+        run_stage(c, action, **kw)
+    z0 = tip(dash.m)[2]
+    st = run_stage(c, "lift")
+    assert st["state"] == "done", st
+    rose = tip(dash.m)[2] - z0
+    assert 0.025 <= rose < 0.30 and c.state()["grasp"]["stage"] == "lifted"
+    assert c.grasp["lifted_dz"] == pytest.approx(rose, abs=0.004)
+    assert run_stage(c, "putback")["state"] == "done"
+    assert tip(dash.m)[2] - z0 > 0.01 and dash.m["gripper"] == pytest.approx(80.0, abs=1.5)      # put down, released, and risen clear
+
+
+def test_a_lift_that_cannot_reach_2_5_cm_says_so_clearly():
+    dash, c, rest = grasp_rig(gripper_floor=49.4)
+    x, y = block_xy(rest)
+    for action, kw in (("open", {}), ("hover", dict(x=x, y=y)), ("lower", {}), ("close", {})):
+        run_stage(c, action, **kw)
+    now = {k: float(v) for k, v in dash.m.items()}
+    dash.limits = {**LIMITS, "wrist_flex": [-95, now["wrist_flex"] + 4.0]}              # the wrist has only 4 degrees of room left now
+    with pytest.raises(MoveError, match="nearer the base"):
+        c.grasp_action("lift")
+    assert c.state()["grasp"]["stage"] == "closed" and dash.owner is None
+
+
+def test_control_dropped_by_the_controller_right_after_the_jaws_stall_still_counts_as_a_grip():
+    dash, c, rest = grasp_rig(gripper_floor=49.4)
+    x, y = block_xy(rest)
+    for action, kw in (("open", {}), ("hover", dict(x=x, y=y)), ("lower", {})):
+        run_stage(c, action, **kw)
+    orig = c.mover.beat
+    state = {"n": 0}
+
+    def flaky(token):
+        state["n"] += 1
+        if dash.m["gripper"] <= 49.5 and dash.cmd["gripper"] < 48.5:                 # the jaws stalled on the block: "Arm fault; holding the arm"
+            raise MoveError("Controller refused /api/control/heartbeat: A live control token is required.")
+        return orig(token)
+    c.mover.beat = flaky
+    st = run_stage(c, "close")
+    assert st["state"] == "done" and "Holding a block" in st["message"], st
+    assert c.state()["grasp"]["stage"] == "closed"

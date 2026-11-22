@@ -528,7 +528,7 @@ class RealArmClient:
         if action == "close":
             return self._launch_job("close gripper", self._close_gripper, None)
         if action == "lift":
-            return self._grasp_lift(measured, floor)
+            return self._grasp_lift(state, measured, floor)
         return self._grasp_putback(measured, floor)
 
     def _launch_job(self, label: str, fn, pending) -> dict:
@@ -569,15 +569,31 @@ class RealArmClient:
         raise MoveError(f"The gripper did not reach {value:.0f} (it reads {measured:.0f}).")
 
     def _close_gripper(self, token: str) -> None:
-        """Close slowly; the moment the jaws touch (they lag the command and stop moving) stop pushing: command just below the reading."""
+        """Close slowly; the moment the jaws touch (they lag the command and stop moving) stop pushing: command just below the reading.
+        The controller sometimes drops control right after the jaws stall ("Arm fault; holding the arm"): if the jaws are holding a block
+        at that moment, that is a successful grip, not an error."""
         gs = self.gs
+
+        def beat() -> bool:                                                   # False = control was dropped but the jaws hold a block
+            try:
+                self.mover.beat(token)
+                return True
+            except MoveError:
+                measured, command = self._gripper_state()
+                if measured >= gs.hold_min and measured - command >= 1.0:
+                    self.grasp["pending"] = ("closed", {"hold": measured})
+                    self.mover._set(message=f"Holding a block: the jaws stalled at {measured:.1f}. (The controller released control; the grip holds.)")
+                    return False
+                raise
+
         measured, command = self._gripper_state()
         target, last, still_since = command, measured, None
         while True:
             self.mover._check()
             target = max(gs.close_floor, target - gs.close_step)
             self.http("POST", "/api/target", {"token": token, "joint": "gripper", "value": target})
-            self.mover.beat(token)
+            if not beat():
+                return
             time.sleep(0.2)
             measured, _ = self._gripper_state()
             moving = last - measured > gs.stall_eps
@@ -588,7 +604,8 @@ class RealArmClient:
                 break
         for _ in range(3):                                                    # let it settle, then read the stall value
             time.sleep(0.2)
-            self.mover.beat(token)
+            if not beat():
+                return
             measured, _ = self._gripper_state()
         if measured >= gs.hold_min:
             self.http("POST", "/api/target", {"token": token, "joint": "gripper", "value": measured - gs.squeeze})
@@ -651,6 +668,27 @@ class RealArmClient:
     def _vertical_waypoints(self, measured: dict[str, float], dz: float, floor) -> list[Waypoint]:
         return _vertical(self.kin, ClickSettings(gripper_max=1e9), measured, dz, floor, 0.01)
 
+    def _vertical_max(self, measured: dict[str, float], dz_max: float, floor, limits: dict | None, min_dz: float) -> tuple[list[Waypoint], float]:
+        """Straight up in 1 cm steps, as far as the arm can go (up to dz_max) without leaving the joint limits (3 degrees of margin).
+        Raises if it cannot reach min_dz."""
+        out: list[Waypoint] = []
+        joints, total, click = dict(measured), 0.0, ClickSettings(gripper_max=1e9)
+        while total < dz_max - 0.001:
+            step = min(0.01, dz_max - total)
+            try:
+                wp = plan_nudge(self.kin, click, joints, step, floor)[0]
+            except MoveError:
+                break
+            if limits and any(not limits[j][0] + 3.0 <= wp.joints[j] <= limits[j][1] - 3.0 for j in ARM):
+                break
+            out.append(wp)
+            joints = {**joints, **wp.joints}
+            total += step
+        if total < min_dz - 1e-9:
+            raise MoveError(f"At this reach the arm can lift the block only {total * 100:.0f} cm before the wrist or elbow reaches its limit "
+                            f"(it needs at least {min_dz * 100:.0f} cm). Grasp a block nearer the base.")
+        return out, total
+
     def _grasp_lower(self, state: dict, measured: dict[str, float], floor) -> dict:
         gs = self.gs
         tip_z = float(self.kin.tcp(measured)[2, 3])
@@ -669,29 +707,33 @@ class RealArmClient:
                 self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = saved
         return self._launch_job("lower to grasp height", job, ("lower", {}))
 
-    def _grasp_lift(self, measured: dict[str, float], floor) -> dict:
+    def _grasp_lift(self, state: dict, measured: dict[str, float], floor) -> dict:
         gs = self.gs
         if measured["gripper"] < gs.hold_min - 4:
             raise MoveError("The gripper is not holding a block (it is nearly closed).")
-        wps = self._vertical_waypoints(measured, gs.lift_m, floor)
+        limits = (state.get("cartesian") or {}).get("joint_limits", {}).get("effective")
+        wps, planned = self._vertical_max(measured, gs.lift_m, floor, limits, 0.025)
 
         def job(token: str) -> None:
             z0 = float(self.kin.tcp(measured)[2, 3])
             self.mover.run_waypoints(token, wps, "lifting the block", trim_last=True)
             now = self.http("GET", "/api/state", None)
             rose = float(self.kin.tcp({k: float(v) for k, v in now["measured"].items()})[2, 3]) - z0
-            if rose < 0.6 * gs.lift_m:
-                raise MoveError(f"The arm did not lift: the tip rose only {rose * 100:.1f} cm of {gs.lift_m * 100:.0f} cm (the arm sags at this reach). "
+            if rose < 0.6 * planned:
+                raise MoveError(f"The arm did not lift: the tip rose only {rose * 100:.1f} cm of {planned * 100:.0f} cm (the arm sags at this reach). "
                                 "The block is still gripped on the table; try Lift again or Put back and release.")
             held, _ = self._gripper_state()
             if held < gs.hold_min - 6:
                 self.grasp.update(stage="miss", pending=None)
                 raise MoveError(f"The block was lost during the lift (the jaws read {held:.0f}).")
-        return self._launch_job("lift the block", job, ("lifted", {}))
+            self.grasp["pending"] = ("lifted", {"lifted_dz": rose})
+            self.mover._set(message=f"Lifted the block {rose * 100:.1f} cm.")
+        return self._launch_job("lift the block", job, None)
 
     def _grasp_putback(self, measured: dict[str, float], floor) -> dict:
         gs = self.gs
-        down = self._vertical_waypoints(measured, -gs.lift_m, floor)
+        dz = float(self.grasp.get("lifted_dz") or gs.lift_m)
+        down = self._vertical_waypoints(measured, -dz, floor)
 
         def job(token: str) -> None:
             saved = (self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s)
@@ -703,7 +745,9 @@ class RealArmClient:
             self._gripper_to(token, gs.open_value)
             now = self.http("GET", "/api/state", None)
             joints = {k: float(v) for k, v in now["measured"].items()}
-            self.mover.run_waypoints(token, self._vertical_waypoints(joints, gs.lift_m + 0.02, floor), "rising clear")
+            clear, _ = self._vertical_max(joints, dz + 0.02, floor, None, 0.0)
+            if clear:
+                self.mover.run_waypoints(token, clear, "rising clear")
         return self._launch_job("put the block back", job, ("hover", {}))
 
     def stop(self) -> dict:
