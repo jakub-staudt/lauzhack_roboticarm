@@ -1,0 +1,17 @@
+{
+ "joints": {
+  "shoulder_pan": -7.998046875,
+  "shoulder_lift": 56.42578125,
+  "elbow_flex": -67.060546875,
+  "wrist_flex": 94.130859375,
+  "wrist_roll": -97.3828125,
+  "gripper": 10.380116959064328
+ },
+ "tip_xyz_m": [
+  0.3247201619659065,
+  0.028100483820657846,
+  0.027063908986636284
+ ],
+ "still": true,
+ "owner": "Eye-control UI (Jakub)"
+}

@@ -103,3 +103,5 @@ release; a pick-and-place takes about 15 to 20 seconds. The speeds are the const
 Tests: `pip install pytest && python -m pytest simulator` (the Gazebo test skips itself when Gazebo is missing).
 If rendering fails on a headless Linux machine, set `MUJOCO_GL=egl` (the server does this by default on Linux).
 Placement accuracy in Gazebo is about 1 cm: the cube can shift slightly in the gripper when released.
+
+The web server also accepts moves in the arm's own frame: `POST /api/go_to_base {x, y, height_cm}` (metres, x forward, y left), used by `lauzkach_eye_robot_control`. If a point is too far for a straight-down gripper, the gripper is tilted (as the real arm does at its far corners).

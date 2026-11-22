@@ -51,3 +51,9 @@ table { width: 100%; border-collapse: collapse; }
 #cal-list { margin: 6px 0; padding-left: 20px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 label.inline { display: inline-flex; margin: 0 0 0 10px; gap: 4px; }
+
+button.softstop { background: #fff3e0; color: #8a4b00; border: 2px solid #e08a00; font-weight: 700; }
+@media (prefers-color-scheme: dark) { button.softstop { background: #3a2a0e; color: #f2b04a; border-color: #f2b04a; } }
+
+#cam-note label { display: inline-flex; gap: 4px; align-items: center; margin-left: 10px; font-size: .85rem; }
+#cam-note select { font: inherit; }

@@ -45,6 +45,31 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
 .readout { margin-top: 8px; font-size: .9rem; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.4em; }
 .stage canvas { cursor: crosshair; }
+.arm-choice { display: flex; gap: 16px; align-items: center; }
+.arm-choice label { display: inline-flex; gap: 6px; align-items: center; }
+.real-warn { margin: 6px 0; padding: 10px 12px; border-radius: 10px; background: var(--bad-bg); color: var(--bad); border: 2px solid var(--bad); font-size: .92rem; }
+.real-warn[hidden], #real-status[hidden] { display: none; }
+.points { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; flex: 1 1 100%; }
+@media (max-width: 640px) { .points { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.points button { min-height: 52px; padding: 6px 8px; font-size: .88rem; line-height: 1.2; }
+.points button small { display: block; color: var(--muted); font-weight: 400; }
+.points button.on-real { border-color: var(--bad); }
+.drive { margin-top: 14px; }
+.drive-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.drive-head h2 { margin: 0; }
+.drive-row { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 10px 0; font-size: .9rem; }
+.drive-row label { display: inline-flex; gap: 6px; align-items: center; }
+select { font: inherit; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.drive-block { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; padding: 10px 0; border-top: 1px solid var(--line); }
+.drive-block > div:first-child { display: grid; gap: 2px; min-width: 0; flex: 1 1 18em; }
+.drive-block b { font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.drive-block span { font-variant-numeric: tabular-nums; font-size: .92rem; }
+.drive-buttons { display: flex; gap: 8px; }
+button.stop { background: var(--bad-bg); color: var(--bad); border: 2px solid var(--bad); font-weight: 700; min-height: 48px; padding: 8px 22px; }
+.stop-block .hint { flex: 1 1 18em; margin: 0; }
+.servo-log { color: var(--ink); font-size: .85rem; margin: 0 0 6px; }
+.servo-log li.final { font-weight: 600; }
+.drive-log { list-style: none; margin: 6px 0 0; padding: 0; font-size: .8rem; color: var(--muted); display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
 .crop { background: var(--idle-bg); border-radius: 10px; aspect-ratio: 1; display: grid; place-items: center; overflow: hidden; }
 .crop img { width: 100%; height: 100%; display: block; object-fit: contain; }

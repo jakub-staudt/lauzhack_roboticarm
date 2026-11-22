@@ -32,6 +32,8 @@ import numpy as np
 
 from simulator import frame
 from simulator.planner import Planner, Unreachable
+from soarm_lab.kinematics import RobotKinematics
+from soarm_lab.station import PREFIX
 
 STATIC = Path(__file__).resolve().parent / "static"
 REACH_MAP = Path(__file__).resolve().parent / "reach_map.json"
@@ -54,7 +56,8 @@ def png_bytes(rgb: np.ndarray) -> bytes:
 class Station:
     """Gazebo + planner + the single running task."""
 
-    def __init__(self, backend: str = "mujoco") -> None:
+    def __init__(self, backend: str = "mujoco", park_base: tuple[float, float] | None = None, park_height_cm: float = 3.0) -> None:
+        self.park_base, self.park_height_cm = park_base, park_height_cm   # the resting spot, in the ARM's frame [m]: out of the camera's way
         self.planner = Planner()
         if backend == "gazebo":  # optional: needs Gazebo (and on Linux the ROS Jazzy bindings); the default needs neither
             from simulator.gazebo.client import GazeboStation
@@ -63,6 +66,9 @@ class Station:
             from simulator.mujoco_backend import MujocoStation
             self.sim = MujocoStation()
         self.sim.wait_ready(timeout=60)
+        # a second kinematics object for reading the tip: the planner's one is busy while a plan is being built
+        self._tip_kin = RobotKinematics(self.planner.robot, self.planner.model, prefix=PREFIX)
+        self._tip_lock = threading.Lock()
         self.lock = threading.Lock()
         self.cancel = threading.Event()
         self.task = {"state": "idle", "label": "", "step": 0, "total": 0, "message": "Ready."}
@@ -81,8 +87,15 @@ class Station:
             out.append({"color": color, "x": x, "y": y, "z": z, "label": frame.describe(x, y), "held": z > 0.775})
         return out
 
+    def tip_base(self) -> dict:
+        """The gripper tip in the arm's base frame [m]: x forward, y to the left, z up (table about 0)."""
+        with self._tip_lock:
+            x, y, z = self._tip_kin.tcp(self.planner.to_app(self.sim.joints()))[:3, 3]
+        return {"x": round(float(x), 4), "y": round(float(y), 4), "z": round(float(z), 4)}
+
     def state(self) -> dict:
-        return {"task": dict(self.task), "blocks": self.blocks(),
+        return {"task": dict(self.task), "blocks": self.blocks(), "tip_base": self.tip_base(),
+                "park": None if self.park_base is None else {"x": self.park_base[0], "y": self.park_base[1], "height_cm": self.park_height_cm},
                 "joints": {k: round(v, 3) for k, v in self.sim.joints().items()}}
 
     def png(self) -> bytes:
@@ -144,11 +157,27 @@ class Station:
                 raise BadRequest(f"The {other['color']} block is in the way at the destination.")
         src, dst = (near["x"], near["y"]), (dx, dy)
         name = f"Move {near['color']} {frame.describe(*src)} → {frame.describe(*dst)}"
-        return self._start(name, lambda: self.planner.pick_and_place(self.sim.joints(), src, dst))
+        park = None if self.park_base is None else (float(self.planner.base[0]) + self.park_base[0], float(self.planner.base[1]) + self.park_base[1])
+        return self._start(name, lambda: self.planner.pick_and_place(self.sim.joints(), src, dst, park=park, park_height=self.park_height_cm / 100.0))
 
     def go_to(self, px) -> dict:
         x, y = frame.pixel_to_world(*px)
         return self._start(f"Move tip to {frame.describe(x, y)}", lambda: self.planner.go_to(self.sim.joints(), (x, y)))
+
+    def go_to_base(self, x: float, y: float, height_cm: float) -> dict:
+        """Move the tip over a point given in the ARM'S OWN frame (metres: x forward, y left), `height_cm` above the table.
+        Used by the camera page: its points come from the robot's recorded calibration, not from the drawn blocks."""
+        if not (0.05 <= x <= 0.45 and -0.30 <= y <= 0.30) or not 0.5 <= height_cm <= 10:
+            raise BadRequest("That point is outside the arm's working area.")
+        world = (float(self.planner.base[0]) + x, float(self.planner.base[1]) + y)
+        return self._start(f"Move tip over base ({x * 100:.1f}, {y * 100:.1f}) cm",
+                           lambda: self.planner.go_to(self.sim.joints(), world, height=height_cm / 100.0))
+
+    def park(self) -> dict:
+        """Go to the resting spot (3 cm above the bottom-left corner), out of the camera's way."""
+        if self.park_base is None:
+            raise BadRequest("No park spot is configured (start the server with --park-points).")
+        return self.go_to_base(self.park_base[0], self.park_base[1], self.park_height_cm)
 
     def go_home(self) -> dict:
         def build():
@@ -222,6 +251,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.station.pick_and_place(pt("src"), pt("dst")))
             if path == "/api/go_to":
                 return self._json(self.station.go_to(pt("at")))
+            if path == "/api/go_to_base":
+                return self._json(self.station.go_to_base(float(body["x"]), float(body["y"]), float(body.get("height_cm", 3.0))))
+            if path == "/api/park":
+                return self._json(self.station.park())
             if path == "/api/home":
                 return self._json(self.station.go_home())
             if path == "/api/stop":
@@ -245,10 +278,21 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8810)
+    ap.add_argument("--park-points", default=str(Path(__file__).resolve().parents[2] / "robotic_arm" / "calibration_poses.json"),
+                    help="calibration points recorded with the real arm; the arm parks 3 cm above its corner_00 (bottom-left) after each move")
+    ap.add_argument("--park-height-cm", type=float, default=3.0)
     ap.add_argument("--backend", choices=("mujoco", "gazebo"), default="mujoco",
                     help="mujoco (default): runs anywhere with `pip install mujoco`; gazebo: needs a running Gazebo")
     args = ap.parse_args()
-    Handler.station = Station(args.backend)
+    park_base = None
+    try:
+        for point in json.loads(Path(args.park_points).read_text()):
+            if point.get("name") == "corner_00":
+                park_base = (float(point["xyz_m"][0]), float(point["xyz_m"][1]))
+    except (OSError, ValueError, KeyError):
+        pass
+    print(f"park spot: {'none (home pose is used)' if park_base is None else f'x {park_base[0] * 100:.1f}, y {park_base[1] * 100:.1f} cm in the arm frame, {args.park_height_cm:g} cm up'}")
+    Handler.station = Station(args.backend, park_base, args.park_height_cm)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.daemon_threads = True
     print(f"Gaze station UI ({args.backend}) on http://{args.host}:{args.port}")

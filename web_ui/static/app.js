@@ -147,7 +147,7 @@ function begin(direction, source) {
 }
 const typing = t => t?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])');
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { e.preventDefault(); emergencyStop(); return; }
+  if (e.key === 'Escape') { e.preventDefault(); softStop(); return; }
   const dir = KEYS[e.key?.toLowerCase()];
   if (!dir || e.repeat || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || typing(e.target)) return;
   if (begin(dir, 'key:' + e.key.toLowerCase())) e.preventDefault();
@@ -182,16 +182,29 @@ window.addEventListener('pagehide', () => {
   if (token !== null) fetch('/api/control/release', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({token}), keepalive: true}).catch(() => {});
 });
 
-// Cameras: live MJPEG streams at 20 fps (the dashboard streams 2 fps unless asked), reconnecting if a stream drops or the tab comes back.
-function liveStream(imgId, url) {
+// Cameras: live MJPEG streams (the dashboard streams 2 fps unless asked). Video shares the connection with the controls, so the frame
+// rate and the wrist camera can be changed live here (or by ?fps=2|10|15|20 and ?wrist=0 in the address) when the link is laggy.
+const _q = new URLSearchParams(location.search);
+$('cam-fps').value = ['2', '10', '15', '20'].includes(_q.get('fps')) ? _q.get('fps') : '20';
+$('wrist-on').checked = _q.get('wrist') !== '0';
+const _streams = [];
+function liveStream(imgId, urlFn, enabledFn = () => true) {
   const img = $(imgId); let timer = null;
-  const connect = () => { clearTimeout(timer); img.src = url + '&t=' + Date.now(); };
-  img.addEventListener('error', () => { timer = setTimeout(connect, 2000); });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) connect(); });
-  connect();
+  const connect = () => {
+    clearTimeout(timer);
+    if (!enabledFn() || document.hidden) { img.removeAttribute('src'); return; }   // dropping the src closes the stream
+    img.src = urlFn() + '&t=' + Date.now();
+  };
+  img.addEventListener('error', () => { if (enabledFn()) timer = setTimeout(connect, 2000); });
+  document.addEventListener('visibilitychange', connect);
+  _streams.push(connect); connect();
 }
-liveStream('overhead', '/cameras/overhead.mjpg?fps=20&profile=preview');
-liveStream('wrist', '/cameras/wrist.mjpg?fps=20&profile=preview');
+const _camFps = () => $('cam-fps').value;
+liveStream('overhead', () => `/cameras/overhead.mjpg?fps=${_camFps()}&profile=preview`);
+liveStream('wrist', () => `/cameras/wrist.mjpg?fps=${_camFps()}&profile=preview`, () => $('wrist-on').checked);
+$('cam-fps').onchange = () => _streams.forEach(c => c());
+$('wrist-on').onchange = () => { $('wrist').closest('figure').hidden = !$('wrist-on').checked; _streams.forEach(c => c()); };
+$('wrist').closest('figure').hidden = !$('wrist-on').checked;
 
 // Wrist-roll nudge: a plain joint move, allowed even when the roll sits at its end stop (Cartesian moves are refused there).
 async function nudgeRoll(delta) {
@@ -303,3 +316,14 @@ $('nudge-up').onclick = () => nudgeTip(+1);
 $('nudge-down').onclick = () => nudgeTip(-1);
 const _render3 = render;
 render = function () { _render3(); for (const id of ['nudge-up', 'nudge-down']) $(id).disabled = !own() || stopped() || mvp.move?.state === 'moving'; };
+
+// Soft stop: halt the arm where it is, end a held key and cancel a click-move. NOT the emergency stop (that one latches the
+// controller): afterwards the control lease is released, so click "Take control" to carry on, remotely.
+async function softStop() {
+  const t = token;
+  cancelHold();
+  note('Stopping…');
+  await Promise.allSettled([mvpPost('cancel'), t ? post('stop', {token: t}, 2500) : Promise.resolve()]);
+  note('Motion stopped; the arm is holding where it is. This was not the emergency stop: click Take control to carry on.');
+}
+$('softstop').onclick = softStop;

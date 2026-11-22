@@ -10,7 +10,8 @@
 <header>
   <h1>Arm control</h1>
   <div id="status" class="pill">connecting…</div>
-  <button id="estop" class="danger">STOP (Esc)</button>
+  <button id="softstop" class="softstop" title="Halts the arm where it is and cancels the current move. NOT the emergency stop: nothing latches, and you can click Take control and carry on remotely.">Stop motion (Esc)</button>
+  <button id="estop" class="danger" title="The controller's emergency stop: it latches. Use Stop motion for a normal stop.">EMERGENCY STOP</button>
   <button id="estop-reset" hidden>Reset stop</button>
 </header>
 
@@ -20,7 +21,7 @@
       <img id="overhead" alt="Overhead camera" title="Click to calibrate or move">
       <canvas id="marks"></canvas>
     </div>
-    <div id="cam-note">Overhead camera</div>
+    <div id="cam-note">Overhead camera · <label>frame rate <select id="cam-fps"><option value="2">2 fps</option><option value="10">10 fps</option><option value="15">15 fps</option><option value="20">20 fps</option></select></label> <label><input type="checkbox" id="wrist-on"> wrist camera</label></div>
   </section>
 
   <aside>
@@ -79,7 +80,7 @@
         <tr><td><kbd>I</kbd>/<kbd>K</kbd></td><td>wrist tilt up / down</td></tr>
         <tr><td><kbd>J</kbd>/<kbd>L</kbd></td><td>wrist roll left / right</td></tr>
         <tr><td><kbd>Q</kbd>/<kbd>E</kbd></td><td>gripper open / close</td></tr>
-        <tr><td><kbd>Esc</kbd></td><td>STOP</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Stop motion (soft: nothing latches; the emergency stop is the red button)</td></tr>
       </table>
       <div class="pad" id="pad">
         <button data-dir="forward">▲ W</button>

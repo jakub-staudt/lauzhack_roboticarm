@@ -32,6 +32,47 @@
       <label><input type="checkbox" id="l-left" checked> <span class="key k-left"></span>Left edge candidates</label>
     </div>
     <div id="hover" class="readout">Move the pointer over the picture to read table positions (cm) once the rectangle is locked.</div>
+
+    <section id="drive" class="panel drive" hidden>
+      <div class="drive-head"><h2>Drive the simulator</h2><span id="link" class="chip" data-tone="idle">Link…</span></div>
+      <p id="drive-cal" class="hint"></p>
+      <ul id="drive-warn" class="issues"></ul>
+      <div class="drive-row">
+        <label>The robot faces <select id="faces"></select> in this picture</label>
+        <label>Tip height <select id="height"><option value="3">hover, 3 cm</option><option value="1">low, 1 cm</option></select></label>
+        <label><input type="checkbox" id="l-robot" checked> markers on the picture</label>
+        <label title="After the move, look at where the tip really is in the camera picture and correct the position, a few times."><input type="checkbox" id="closed-loop"> closed-loop correction (camera feedback)</label>
+      </div>
+      <p id="servo-note" class="hint"></p>
+      <ul id="drive-servo" class="drive-log servo-log"></ul>
+      <div class="drive-block arm-block">
+        <div><b>Which arm</b><span>Choose what the buttons below move.</span></div>
+        <div class="arm-choice">
+          <label><input type="radio" name="arm" value="sim" checked> Simulator</label>
+          <label id="arm-real-label"><input type="radio" name="arm" value="real" id="arm-real" disabled> <b>REAL arm</b></label>
+        </div>
+      </div>
+      <p id="real-warn" class="real-warn" hidden><b>REAL ARM selected.</b> Each button moves the physical arm, slowly (20 to 40 seconds), to <b>3 cm above</b> the board, and asks you to confirm first. Keep <b>Stop motion (Esc)</b> ready and watch the arm.</p>
+      <p id="real-status" class="hint" hidden></p>
+      <div class="drive-block points-block">
+        <div><b>Five points</b><span id="points-text">Each button moves the tip to 3 cm above that spot (or the chosen height, in the simulator).</span></div>
+        <div class="points" id="points"></div>
+      </div>
+      <div class="drive-block">
+        <div><b>Click target</b><span id="target-text">Click inside the rectangle on the picture.</span></div>
+        <button id="go-target" disabled>Move simulator here</button>
+      </div>
+      <div class="drive-block">
+        <div><b>Corners, step by step</b><span id="tour-text">Not started. Each press moves the simulated tip to the next corner.</span></div>
+        <div class="drive-buttons"><button id="tour-prev" disabled>◀ Previous</button><button id="tour-next">Next corner ▶</button></div>
+      </div>
+      <div class="drive-block stop-block">
+        <button id="stop-motion" class="stop">Stop motion (Esc)</button>
+        <span class="hint">Halts the arm where it is and cancels moves still on their way. It is <b>not</b> an emergency stop: nothing latches, and you can send the next move straight away.</span>
+      </div>
+      <p id="drive-status" class="timing" aria-live="polite"></p>
+      <ul id="drive-log" class="drive-log"></ul>
+    </section>
   </section>
 
   <aside class="panel">

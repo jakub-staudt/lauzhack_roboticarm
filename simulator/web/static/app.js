@@ -169,6 +169,7 @@ $('go').onclick = execute;
 $('clear').onclick = () => { src = dst = null; draw(); updatePicks(); };
 $('stop').onclick = () => run('/api/stop', {});
 $('home').onclick = () => run('/api/home', {});
+$('park').onclick = () => run('/api/park', {});
 $('reset').onclick = () => { src = dst = null; draw(); updatePicks(); run('/api/reset_blocks', {}); };
 document.addEventListener('keydown', e => { if (e.key === 'Escape') run('/api/stop', {}); });
 

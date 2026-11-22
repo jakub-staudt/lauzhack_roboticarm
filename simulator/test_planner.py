@@ -43,3 +43,24 @@ def test_unreachable_spots_are_refused_with_a_reason(planner):
         planner.pick_and_place(home, (0.45, 0.3), block_to_world("left", 16, 6))
     with pytest.raises(Unreachable, match="destination"):
         planner.pick_and_place(home, (-0.11, 0.05), (0.45, -0.3))
+
+
+def test_hovering_over_a_far_point_tilts_the_gripper_instead_of_refusing(planner):
+    home = planner.to_rad({**planner.home, "gripper": 35.0})
+    near = planner.go_to(home, (planner.base[0] + 0.184, planner.base[1] + 0.038), height=0.03)
+    far = planner.go_to(home, (planner.base[0] + 0.403, planner.base[1] - 0.143), height=0.03)
+    assert near[-1][0] == "move" and "tilted" in far[-1][0]               # straight down when possible, tilted only when needed
+    tip = planner.kin.tcp(planner.to_app(far[-1][1]))[:3, 3]
+    assert np.allclose(tip, [0.403, -0.143, 0.03], atol=0.003)            # and it still ends exactly over the point, 3 cm up
+
+
+def test_pick_and_place_ends_parked_3_cm_above_the_given_spot_and_never_dips_below(planner):
+    home = planner.to_rad({**planner.home, "gripper": 35.0})
+    park = (float(planner.base[0]) + 0.1996, float(planner.base[1]) + 0.0429)            # the recorded bottom-left corner
+    plan = planner.pick_and_place(home, (-0.11, 0.05), block_to_world("left", 16, 6), park=park, park_height=0.03)
+    assert plan[-1][0] == "park"
+    tip = planner.kin.tcp(planner.to_app(plan[-1][1]))[:3, 3]
+    assert np.allclose(tip, [0.1996, 0.0429, 0.03], atol=0.003)
+    heights = [planner.kin.tcp(planner.to_app(q))[2, 3] for label, q, _ in plan if label == "park"]
+    assert min(heights) > 0.029                                                          # never lower than the park height on the way
+    assert plan[0][0] == "open" and "home" not in {label for label, _, _ in plan}        # no return to the old home pose
