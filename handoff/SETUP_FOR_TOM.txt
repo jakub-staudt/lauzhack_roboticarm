@@ -1,0 +1,50 @@
+SETUP FOR TOM: the gaze-driven real-arm run
+==========================================
+
+1) The token (a secret: NEVER commit it, never paste it in a chat)
+   Decrypt it with YOUR private key (the pair whose public key you put in MESSAGE_FOR_ARM_TEAM.txt):
+
+     mkdir -p ~/.gazestation && chmod 700 ~/.gazestation
+     openssl base64 -d -A < handoff/agent_token.enc.b64 | \
+       openssl pkeyutl -decrypt -inkey /PATH/TO/YOUR/private.pem \
+         -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 > ~/.gazestation/agent_token
+     chmod 600 ~/.gazestation/agent_token
+     wc -c ~/.gazestation/agent_token            # about 43 characters
+
+   If the token ever leaks, tell Jakub: he restarts the agent with a new token file (one minute).
+
+2) The calibration file
+     cp handoff/calibration_poses.json robotic_arm/calibration_poses.json      (it is gitignored there; not secret)
+
+3) Start the page server (your launcher kmp_app/run_real.command already does this):
+     python -m lauzkach_eye_robot_control.server \
+       --real-agent http://100.85.56.14:8790 --agent-token-file ~/.gazestation/agent_token \
+       --robot-points robotic_arm/calibration_poses.json \
+       --camera "http://100.85.56.14:8780/cameras/overhead.mjpg?fps=10&profile=preview"
+   Needs the lauzkach project's Python environment (numpy, opencv) and the arm kinematics is NOT needed on your side (the agent plans on the server).
+   Start it with the arm out of the way: the first 5 seconds measure the rectangle.
+   Check:  curl http://127.0.0.1:8820/api/drive   ->  "real": {"connected": true, ..., "height_guard": true, "grasp": {"profile": "centred", ...}}
+
+4) What your app sends (same envelope as the web page)
+   GET  /api/drive            every second (it is also the dead-man heartbeat). Take "server_ms" (the server clock) and "generation" from it.
+   GET  /api/detect           the overhead picture's detection: result.blocks = [{colour, px:[x,y], box_px:[[x,y]x4], yaw_deg, size_px}], picture is 640 x 480,
+                              result.locked = true when the rectangle is measured. Blocks hidden by the arm are not listed.
+   POST /api/drive/pickplace  {"cid": "<unique id>", "sent_ms": <server_ms now>, "gen": <generation>,
+                               "pick": {"px": x, "py": y, "box": box_px, "colour": "blue"},     # picture pixels of the block's centre + its outline
+                               "dest": {"px": x, "py": y},                                        # picture pixels of where the block's centre should go
+                               "others": [[x, y], ...],                                           # the other blocks' centres (optional)
+                               "park_after": true, "confirm_real": true}
+        - sent_ms must be fresh (under 2 s old on the server clock) or the move is refused as stale (a lagging link must never replay an old command).
+        - The same cid is never executed twice (a retried request gets the first answer).
+        - If the arm is ALREADY holding a block (an earlier try stopped after the grip), "pick" can be null: it carries on with carry and place.
+        - Refusals come back as HTTP 400/409 with {"error": "...reason...", "code": "..."}; show the text.
+   Progress: GET /api/drive -> real.sequence = {state: running|done|error|stopped, step 1..7, total 7, name, message}.
+        Steps: open the gripper, move over the block, lower (the gripper camera can stop it), grip, lift, carry to the destination, place + park.
+   POST /api/drive/stop {}    soft stop: halts the arm where it is, nothing latches. Always accepted, send it on every STOP dwell and on Esc.
+
+5) Rules for the first real moves
+   - Someone watches the arm (live camera is fine) with STOP ready, and the manual page ("Eye-control UI") has released control.
+   - Blocks are about 49 mm cubes (red, blue, green, yellow). Pick blocks inside the rectangle, within about 6 to 30 cm of the arm base; the arm cannot
+     reach the far right part. The destination must be a free spot inside the rectangle.
+   - A move takes about 2 minutes. If it stops, the message tells which step and why; the arm holds where it is. A held block stays gripped; the next
+     /api/drive/pickplace with the same block already held carries on (choose a free destination).
