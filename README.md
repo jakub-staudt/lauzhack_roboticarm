@@ -90,6 +90,8 @@ The system follows a simple interaction model:
 
 The interface also provides alternative interaction mechanisms, including direct point selection and explicit movement confirmation.
 
+![REACHA Demo](assets/images/VideoToGif_GIF.gif)
+
 ---
 
 ## Demonstration
@@ -366,7 +368,9 @@ kmp_app/
 
 ## Multiplatform design strategy
 
-![images4](assets/images/image0.jpg)
+<div align="center">
+  <img src="assets/images/image0.jpg" alt="REACHA" height="400"/>
+</div>
 
 A central design decision was to keep the majority of the application in `commonMain`.
 
