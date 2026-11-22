@@ -270,15 +270,16 @@ def _interpolate(kin, a: dict[str, float], b: dict[str, float], n: int) -> tuple
 
 
 def plan_hover_fast(kin, settings: ClickSettings, start: dict[str, float], target_xy: tuple[float, float], z_table: float,
-                    z_floor: float | None, hover_m: float, max_step_deg: float = 3.0) -> list[Waypoint]:
+                    z_floor: float | None, hover_m: float, max_step_deg: float = 3.0, orient_from: dict[str, float] | None = None) -> list[Waypoint]:
     """Same route as `plan_hover` (rise, glide at the glide height, straight down) but with THREE inverse-kinematics solves instead
     of one per centimetre: IK only at the corners of the route, joint-space interpolation between them, and a cheap forward-kinematics
     check that the tip never dips below the allowed height on the way. Raises MoveError if any check fails (the caller then falls
     back to the slow, line-by-line planner)."""
     z_above, z_hover = z_table + settings.above_m, z_table + hover_m
-    pose0 = kin.tcp(start)
-    tip0, R0 = np.array(pose0[:3, 3], float), np.array(pose0[:3, :3])
-    th0 = math.atan2(tip0[1], tip0[0])
+    tip0 = np.array(kin.tcp(start)[:3, 3], float)
+    pose_o = kin.tcp(orient_from or start)                            # the gripper orientation to keep (maybe a re-tilted copy of the pose)
+    R0 = np.array(pose_o[:3, :3])
+    th0 = math.atan2(pose_o[1, 3], pose_o[0, 3])
     tx, ty = target_xy
     low_ok = max(z_hover - 0.005, (z_floor + 0.001) if z_floor is not None else -1.0)          # nothing below this, ever
 
@@ -621,25 +622,29 @@ class RealArmClient:
         gs = self.gs
         if measured["gripper"] < gs.open_value - 12:
             raise MoveError("Open the gripper first.")
-        ax, ay, pitch = self._tool_aim(measured, x, y)
-        if pitch < gs.min_pitch_deg:
-            raise MoveError(f"The gripper points {pitch:.0f} degrees below horizontal; it must be at least {gs.min_pitch_deg:.0f} "
-                            "(nearly straight down). Tilt it down in the manual page first.")
-        click = ClickSettings(above_m=gs.glide_above_table_m, step_m=self.settings.step_m, gripper_max=1e9)
+        _, _, pitch0 = self._tool_aim(measured, x, y)
         limits = (state.get("cartesian") or {}).get("joint_limits", {}).get("effective") or {}
-        try:
+        click = ClickSettings(above_m=gs.glide_above_table_m, step_m=self.settings.step_m, gripper_max=1e9)
+        wf = measured.get("wrist_flex", 0.0)
+        wanted = [p for p in (pitch0,) if gs.min_pitch_deg <= p <= 78.0] + [74.0, 70.0, 78.0, 66.0]   # keep a good tilt, else choose one
+        last_error: MoveError | None = None
+        for pitch in wanted:
+            tilted = {**measured, "wrist_flex": wf + (pitch - pitch0)}          # same jaw direction, only the tilt changes
+            ax, ay, _ = self._tool_aim(tilted, x, y)
             try:
-                wps = plan_hover_fast(self.kin, click, measured, (ax, ay), self.z_table, floor, gs.hover_above_table_m, self.settings.max_step_deg)
-            except MoveError:
-                wps = plan_hover(self.kin, click, measured, (ax, ay), self.z_table, floor, gs.hover_above_table_m, self.settings.max_step_deg)
-            self._check_limits(wps, limits)
-        except MoveError as exc:
-            wf, top = measured.get("wrist_flex", 0.0), (limits.get("wrist_flex") or (0.0, 95.0))[1]
-            if wf > top - 12:
-                raise MoveError(f"The wrist is bent to {wf:.0f} of {top:.0f} degrees (the gripper points {pitch:.0f} degrees below horizontal, nearly "
-                                "straight down), so the arm has no room to rise and move. Tilt the gripper back about 15 degrees, to about 70 to 75 "
-                                "degrees below horizontal, and try again.") from exc
-            raise
+                try:
+                    wps = plan_hover_fast(self.kin, click, measured, (ax, ay), self.z_table, floor, gs.hover_above_table_m, self.settings.max_step_deg, orient_from=tilted)
+                except MoveError:
+                    wps = plan_hover(self.kin, click, tilted, (ax, ay), self.z_table, floor, gs.hover_above_table_m, self.settings.max_step_deg)
+                self._check_limits(wps, limits)
+                break
+            except MoveError as exc:
+                last_error = exc
+        else:
+            raise MoveError(f"The arm cannot hover over that block with the gripper pointing about 66 to 78 degrees below horizontal "
+                            f"({last_error}). Try a block nearer the base.")
+        if abs(pitch - pitch0) > 1.0:
+            self.mover._set(message=f"Tilting the gripper from {pitch0:.0f} to {pitch:.0f} degrees below horizontal while hovering.")
         return self._launch_job("hover over the block", lambda t: self.mover.run_waypoints(t, wps, "hover over the block"),
                                 ("hover", {"block": (x, y), "aim": (ax, ay)}))
 

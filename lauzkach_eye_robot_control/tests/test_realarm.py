@@ -330,13 +330,7 @@ def test_hover_needs_an_open_gripper_a_downward_pointing_tool_and_a_point_inside
         c.grasp_action("hover", x=0.9, y=0.9)
     with pytest.raises(MoveError, match="Click the block"):
         c.grasp_action("hover")
-    tilted = {k: float(v) for k, v in POINTS[2]["joints"].items()}                  # far corner: the gripper leans about 50 degrees
-    dash2 = FakeDashboard(joints=tilted, gripper=80.0)
-    c2 = client(dash2)
-    c2.grasp = {"stage": "open", "pending": None}
-    with pytest.raises(MoveError, match="at least 65"):
-        c2.grasp_action("hover", x=block_xy(tilted)[0], y=block_xy(tilted)[1])
-    assert dash2.targets == []
+    assert dash.targets and dash.owner is None                                      # (nothing else was refused above: the earlier cases never moved)
 
 
 def test_hover_with_the_gripper_closed_is_refused():
@@ -453,14 +447,22 @@ def test_a_lift_that_does_not_raise_the_tip_is_an_error_and_a_sagging_lift_is_co
     assert c2.state()["grasp"]["stage"] == "closed"
 
 
-def test_a_wrist_bent_almost_to_its_limit_gets_a_clear_message_not_a_joint_limit_error():
-    rest0 = {k: float(v) for k, v in POINTS[0]["joints"].items()}
-    dash, c, rest = grasp_rig(limits={**LIMITS, "wrist_flex": [-95, rest0["wrist_flex"] + 2.0]})   # the wrist has only 2 degrees of room left
-    x, y = block_xy(rest)
-    run_stage(c, "open")
-    with pytest.raises(MoveError, match="Tilt the gripper back"):
-        c.grasp_action("hover", x=x, y=y)
-    assert dash.owner is None and c.state()["grasp"]["stage"] == "open"
+def test_hover_chooses_its_own_tilt_so_a_steep_or_shallow_gripper_does_not_have_to_be_tilted_by_hand():
+    for dwf in (+12.0, -14.0):                                                      # bent too far / too shallow compared with the rest pose
+        rest0 = {k: float(v) for k, v in POINTS[0]["joints"].items()}
+        steep = {**rest0, "wrist_flex": rest0["wrist_flex"] + dwf}
+        dash = FakeDashboard(joints=steep, gripper=10.0)
+        c = client(dash)
+        x, y = block_xy(steep, dx=0.02, dy=-0.02)
+        run_stage(c, "open")
+        st = run_stage(c, "hover", x=x, y=y)
+        assert st["state"] == "done", (dwf, st)
+        from soarm_lab.kinematics import RobotKinematics  # noqa: F401
+        approach, _ = KIN.tool_axes({k: float(v) for k, v in dash.m.items()})
+        pitch = float(np.degrees(np.arcsin(-approach[2])))
+        assert 64.0 < pitch < 79.0, pitch
+        assert dash.owner is None and c.state()["grasp"]["stage"] == "hover"
+
 
 
 def test_the_saved_grasp_profiles_load_and_the_elite_one_aims_23_mm_behind_the_block_with_a_wide_opening():
