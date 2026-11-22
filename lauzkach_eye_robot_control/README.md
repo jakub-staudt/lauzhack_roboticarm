@@ -12,20 +12,6 @@ Separate project for the eye-controlled robot arm. It lives next to the RAMION s
 Step 1 (this version): find the **left rectangle** (the 20 x 20 cm square) in the overhead camera and draw what the
 detector believes on a web page, so it can be checked by eye.
 
-## Gaze page: `/gaze` (full-screen camera, controlled by the eyes)
-`http://127.0.0.1:8820/gaze` shows the overhead camera across the whole screen. The eye tracker (`gaze_service`, EyeGestures on the laptop's webcam)
-gives the gaze point; the page does the rest: **look at a block for 2 s** to pick it, **look at a free spot inside the rectangle for 2 s** to choose
-where it goes, then look at **Select** (1.5 s) and confirm with **Yes, move it**; the arm runs every step by itself. Buttons (look at them for 1.5 s, or click):
-**Select** (move the chosen block to the chosen spot), **Restart selection**, **Cancel** (stop the arm; Esc does the same) and **Calibrate eyes**
-(the tracker's own 25-dot calibration, then the 5-cross correction; K does the same). Mouse clicks work too. F = full screen, R = restart.
-
-Start order: the arm agent (server), then
-```bash
-python -m gaze_service.server --port 8830          # the eye tracker; add --mock to test without a camera (POST /api/mock {"x":..,"y":..})
-python -m lauzkach_eye_robot_control.server --port 8820 ... --tracker http://127.0.0.1:8830
-```
-The tracker needs its own Python environment (`python3 -m venv gaze_service/.venv && gaze_service/.venv/bin/pip install -r requirements.txt`).
-
 ## Safety: read-only
 
 The page server only sends HTTP `GET` requests for camera pictures. It never talks to the arm controller (`:8765`), never

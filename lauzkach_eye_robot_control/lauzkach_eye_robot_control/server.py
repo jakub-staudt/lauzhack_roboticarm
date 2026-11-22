@@ -237,8 +237,6 @@ class Handler(BaseHTTPRequestHandler):
     service: DriveService | None = None
     sim_page: str = ""                                  # the simulator page embedded in the right column
     wrist_url: str = ""                                 # fixed at start-up, never taken from a request
-    overhead_stream: str = ""                           # a faster overhead stream for the full-screen gaze page
-    tracker_url: str = ""                               # the eye tracker's gaze service (read by the gaze page in the browser)
     protocol_version = "HTTP/1.1"
 
     def _send(self, status: int, body: bytes, ctype: str) -> None:
@@ -253,16 +251,13 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def _stream_wrist(self) -> None:
-        self._relay(self.wrist_url, "the gripper camera")
-
-    def _relay(self, url: str, what: str) -> None:
-        """Relay a camera's MJPEG stream (a plain read-only GET of the dashboard). Ends when the page closes it."""
-        if not url:
-            return self._send(404, f"{what} is not configured".encode(), "text/plain")
+        """Relay the gripper camera's MJPEG stream (a plain read-only GET of the dashboard). Ends when the page closes it."""
+        if not self.wrist_url:
+            return self._send(404, b"the gripper camera is not configured", "text/plain")
         try:
-            upstream = urllib.request.urlopen(url, timeout=8)
+            upstream = urllib.request.urlopen(self.wrist_url, timeout=8)
         except OSError as exc:
-            return self._send(502, f"{what} is not reachable ({type(exc).__name__})".encode(), "text/plain")
+            return self._send(502, f"the gripper camera is not reachable ({type(exc).__name__})".encode(), "text/plain")
         with upstream:
             self.send_response(200)
             self.send_header("Content-Type", upstream.headers.get("Content-Type", "multipart/x-mixed-replace"))
@@ -283,15 +278,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/drive":
             if self.service is None:
                 return self._send(200, json.dumps({"enabled": False}).encode(), "application/json")
-            return self._send(200, json.dumps({"enabled": True, "sim_page": self.sim_page, "tracker_url": self.tracker_url, **self.service.overview()}).encode(), "application/json")
+            return self._send(200, json.dumps({"enabled": True, "sim_page": self.sim_page, **self.service.overview()}).encode(), "application/json")
         if path == "/api/detect":
             return self._send(200, json.dumps(self.analyzer.snapshot()).encode(), "application/json")
         if path == "/wrist.mjpg":
             return self._stream_wrist()
-        if path == "/overhead.mjpg":
-            return self._relay(self.overhead_stream, "the overhead camera stream")
-        if path == "/gaze":
-            path = "/gaze.html"
         for prefix, crop in (("/frame/", False), ("/crop/", True)):
             if path.startswith(prefix) and path.endswith(".jpg"):
                 try:
@@ -358,8 +349,6 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--camera", default=DEFAULT_CAMERA, help="MJPEG stream of the overhead camera (read-only GET)")
     ap.add_argument("--wrist-snapshot", default="http://100.85.56.14:8780/cameras/wrist.jpg", help="one gripper-camera picture (read-only GET); used to watch the block while lowering")
-    ap.add_argument("--overhead-stream", default="http://100.85.56.14:8780/cameras/overhead.mjpg?fps=10&profile=preview", help="overhead MJPEG for the full-screen gaze page (/gaze)")
-    ap.add_argument("--tracker", default="http://127.0.0.1:8830", help="the eye tracker's gaze service (gaze_service, python -m gaze_service.server --port 8830)")
     ap.add_argument("--wrist-camera", default=DEFAULT_WRIST, help="MJPEG stream of the gripper (first-person) camera; empty to turn it off")
     ap.add_argument("--image", help="use this picture instead of the camera")
     ap.add_argument("--host", default="127.0.0.1")
@@ -410,8 +399,6 @@ def main() -> None:
         real = RealArmClient(pooled_http(args.dashboard), RobotKinematics(load_robot()), [(p["x"], p["y"]) for p in robot_map.points], robot_map.z_table)
         print("*** REAL ARM ENABLED: the five buttons can move the physical arm (hover >= 3 cm, slow, each move confirmed). Keep Stop (Esc) ready. ***")
     Handler.wrist_url = args.wrist_camera
-    Handler.overhead_stream = args.overhead_stream
-    Handler.tracker_url = args.tracker
     Handler.sim_page = args.simulator.rstrip("/") + "/"
     def wrist_fetch():
         with urllib.request.urlopen(args.wrist_snapshot, timeout=3) as r:
