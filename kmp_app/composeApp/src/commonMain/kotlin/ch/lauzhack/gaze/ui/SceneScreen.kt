@@ -42,13 +42,6 @@ private val RING = Color(60, 60, 60)
 private val BUTTON = Color(50, 50, 50)
 private val BUTTON_FILL = Color(70, 110, 160)
 
-private fun cubeColor(name: String) = when (name) {
-    "red" -> Color(235, 80, 80)
-    "green" -> Color(90, 220, 120)
-    "blue" -> Color(90, 140, 255)
-    "yellow" -> Color(240, 210, 70)
-    else -> FG
-}
 
 private fun named(c: String) = when (c) { "orange" -> ORANGE; "green" -> GREEN; "red" -> RED; else -> FG }
 
@@ -186,19 +179,12 @@ private fun DrawScope.drawScene(
 
     if (v != null) {
         val targets = scene.targets(v)
-        // objects: coloured box, dwell ring, name
+        // objects: dwell ring and name (no coloured outline: the camera shows the block itself)
         if (flow == Flow.Object || flow == Flow.Destination) {
             for (o in scene.objects()) {
                 if (flow == Flow.Destination) continue
                 val b = scene.cubeBox(o)
                 val r = Rect(scene.img2scr(b.topLeft, v), scene.img2scr(b.bottomRight, v))
-                if (o.box.size >= 3) {   // the detector's (turned) square around the block
-                    val pts = o.box.map { scene.img2scr(it, v) * d }
-                    drawPath(Path().apply { moveTo(pts[0].x, pts[0].y); pts.drop(1).forEach { lineTo(it.x, it.y) }; close() },
-                        cubeColor(o.color), style = Stroke(3 * d))
-                } else {
-                    drawRoundRect(cubeColor(o.color), r.topLeft * d, r.size * d, CornerRadius(8 * d), style = Stroke(3 * d))
-                }
                 val t = targets.firstOrNull { it.id == o.name } ?: continue
                 val radius = min(max(40f, min(r.width, r.height) * 0.45f), 80f)
                 ring(t.center, (scene.dwell[t.id] ?: 0.0) / t.need, radius, d)
