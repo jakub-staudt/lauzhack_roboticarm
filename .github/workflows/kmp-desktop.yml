@@ -21,7 +21,7 @@ jobs:
           - os: macos-latest        # Apple Silicon
             task: packageMacDmg      # ad-hoc signed with the camera entitlement (see build.gradle.kts)
             files: kmp_app/composeApp/build/compose/binaries/main/dmg/*.dmg
-          - os: macos-13            # Intel
+          - os: macos-15-intel      # Intel
             task: packageMacDmg
             files: kmp_app/composeApp/build/compose/binaries/main/dmg/*.dmg
           - os: windows-latest
