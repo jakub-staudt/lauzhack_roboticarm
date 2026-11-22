@@ -469,7 +469,16 @@ class RealArmClient:
     def _reconcile(self, raw: dict | None) -> None:
         """If the jaws are visibly holding a block (stalled between the hold and open values, the command ahead of the reading) while the
         stage says otherwise, e.g. the controller dropped control during the close, trust what the arm shows."""
-        if not raw or self.mover.busy() or self.grasp["stage"] not in ("idle", "open", "hover", "lower"):
+        if not raw or self.mover.busy():
+            return
+        try:
+            gripper = float(raw["measured"]["gripper"])
+        except (KeyError, TypeError, ValueError):
+            return
+        if self.grasp["stage"] in ("lifted", "closed", "miss") and gripper > self.gs.open_value - 12:
+            self.grasp.update(stage="open", pending=None)                      # the jaws are open again: the block was released
+            return
+        if self.grasp["stage"] not in ("idle", "open", "hover", "lower"):
             return
         try:
             m = float(raw["measured"]["gripper"])
@@ -529,7 +538,7 @@ class RealArmClient:
             return self._launch_job("close gripper", self._close_gripper, None)
         if action == "lift":
             return self._grasp_lift(state, measured, floor)
-        return self._grasp_putback(measured, floor)
+        return self._grasp_putback(state, measured, floor)
 
     def _launch_job(self, label: str, fn, pending) -> dict:
         token = self._claim()
@@ -752,7 +761,7 @@ class RealArmClient:
             self.mover._set(message=f"Lifted the block {rose * 100:.1f} cm.")
         return self._launch_job("lift the block", job, None)
 
-    def _grasp_putback(self, measured: dict[str, float], floor) -> dict:
+    def _grasp_putback(self, state: dict, measured: dict[str, float], floor) -> dict:
         gs = self.gs
         dz = float(self.grasp.get("lifted_dz") or gs.lift_m)
         path = self.grasp.get("lift_path")
@@ -760,6 +769,11 @@ class RealArmClient:
             down = [Waypoint("down", [float(c) for c in self.kin.tcp({**measured, **j})[:3, 3]], dict(j)) for j in reversed(path[:-1])]
         else:
             down = self._vertical_waypoints(measured, -dz, floor)
+        # Work out the rise-clear path NOW, before taking control: planning inside the job starved the heartbeat (1.5 s lease) and the
+        # controller refused the first rising step right after the release.
+        end = {**measured, **down[-1].joints} if down else dict(measured)
+        limits = (state.get("cartesian") or {}).get("joint_limits", {}).get("effective")
+        clear, _ = self._vertical_max(end, dz + 0.02, floor, limits, 0.0)
 
         def job(token: str) -> None:
             saved = (self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s)
@@ -769,11 +783,13 @@ class RealArmClient:
             finally:
                 self.mover.min_height_m, self.mover.settings.max_sag_deg, self.mover.pause_s = saved
             self._gripper_to(token, gs.open_value)
-            now = self.http("GET", "/api/state", None)
-            joints = {k: float(v) for k, v in now["measured"].items()}
-            clear, _ = self._vertical_max(joints, dz + 0.02, floor, None, 0.0)
+            self.grasp["pending"] = ("hover", {})                              # the block is down and released from here on
+            self.mover._set(message="The block is put down and released.")
             if clear:
-                self.mover.run_waypoints(token, clear, "rising clear")
+                try:
+                    self.mover.run_waypoints(token, clear, "rising clear")
+                except MoveError as exc:                                      # not worth failing the step: the block is already released
+                    self.mover._set(message=f"The block is put down and released (the arm did not rise clear: {exc})")
         return self._launch_job("put the block back", job, ("hover", {}))
 
     def stop(self) -> dict:

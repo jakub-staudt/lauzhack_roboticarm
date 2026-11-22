@@ -319,7 +319,7 @@ def test_closing_on_nothing_is_a_miss_and_the_gripper_opens_again():
     assert st["state"] == "error" and "Missed" in st["message"]
     assert dash.m["gripper"] == pytest.approx(80.0, abs=1.5)
     g = c.state()["grasp"]
-    assert g["stage"] == "miss" and g["next"] == ["open"]
+    assert g["stage"] == "open" and "hover" in g["next"]                            # the jaws are open again: hover and lower again
 
 
 def test_hover_needs_an_open_gripper_a_downward_pointing_tool_and_a_point_inside_the_calibrated_area():
@@ -544,3 +544,29 @@ def test_control_dropped_by_the_controller_right_after_the_jaws_stall_still_coun
     st = run_stage(c, "close")
     assert st["state"] == "done" and "Holding a block" in st["message"], st
     assert c.state()["grasp"]["stage"] == "closed"
+
+
+def test_put_back_plans_the_rise_before_taking_control_and_survives_losing_control_after_the_release():
+    dash, c, rest = grasp_rig(gripper_floor=49.4)
+    x, y = block_xy(rest)
+    for action, kw in (("open", {}), ("hover", dict(x=x, y=y)), ("lower", {}), ("close", {}), ("lift", {})):
+        run_stage(c, action, **kw)
+    calls = {"n": 0}
+    orig = c.mover.run_waypoints
+
+    def drop_control_for_the_rise(token, wps, phase="", trim_last=False):
+        if phase == "rising clear":
+            raise MoveError("Controller refused /api/target: A live control token is required.")
+        return orig(token, wps, phase, trim_last)
+    c.mover.run_waypoints = drop_control_for_the_rise
+    st = run_stage(c, "putback")
+    assert st["state"] == "done" and "released" in st["message"], st
+    assert dash.m["gripper"] == pytest.approx(80.0, abs=1.5) and c.state()["grasp"]["stage"] == "hover"
+
+
+def test_an_open_gripper_after_lifted_means_the_block_was_released():
+    dash, c, rest = grasp_rig(gripper_floor=7.7)
+    c.grasp = {"stage": "lifted", "pending": None}
+    dash.m["gripper"], dash.cmd["gripper"] = 80.0, 80.0
+    g = c.state()["grasp"]
+    assert g["stage"] == "open" and "hover" in g["next"]
