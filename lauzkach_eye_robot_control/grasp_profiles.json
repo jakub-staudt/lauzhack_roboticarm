@@ -22,5 +22,13 @@
    "settle": 0.3145,
    "rate": 64.73
   }
+ },
+ "centred": {
+  "open_value": 92.0,
+  "pick_offset_override": null,
+  "align": "jaw_middle",
+  "grasp_tip_above_table_m": 0.02867,
+  "hover_above_table_m": 0.07,
+  "description": "the middle between the open jaws is aimed at the block's centre (computed from the arm's model), with the wrist turned so the jaws close across the block's faces; opening 92, grasp height 28.7 mm"
  }
 }

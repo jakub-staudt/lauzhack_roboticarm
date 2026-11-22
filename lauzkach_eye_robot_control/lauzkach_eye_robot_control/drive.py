@@ -212,8 +212,8 @@ class RemoteRealClient:
     def go_to_base(self, x: float, y: float, height_cm: float) -> dict:
         return self._call("/go", {"x": x, "y": y, "height_cm": height_cm})
 
-    def grasp_action(self, action: str, x: float | None = None, y: float | None = None) -> dict:
-        return self._call("/grasp", {"action": action, "x": x, "y": y})
+    def grasp_action(self, action: str, x: float | None = None, y: float | None = None, yaw: float | None = None) -> dict:
+        return self._call("/grasp", {"action": action, "x": x, "y": y, "yaw": yaw})
 
     def stop(self) -> dict:
         return self._call("/stop", {})

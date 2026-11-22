@@ -570,3 +570,26 @@ def test_an_open_gripper_after_lifted_means_the_block_was_released():
     dash.m["gripper"], dash.cmd["gripper"] = 80.0, 80.0
     g = c.state()["grasp"]
     assert g["stage"] == "open" and "hover" in g["next"]
+
+
+def test_the_hover_turns_the_wrist_so_the_jaws_close_across_the_block_and_puts_the_middle_of_the_open_jaws_on_its_centre():
+    import math
+
+    from lauzkach_eye_robot_control.realarm import GraspSettings, jaw_middle_offset
+    path = str(Path(__file__).resolve().parents[1] / "grasp_profiles.json")
+    rest = {k: float(v) for k, v in POINTS[0]["joints"].items()}
+    for yaw_deg in (0.0, 25.0, -35.0, 70.0):
+        dash = FakeDashboard(joints=rest, gripper=10.0, gripper_floor=49.4)
+        c = RealArmClient(dash, KIN, CAL, z_table=-0.003, settings=RealSettings(pause_s=0.0), grasp_settings=GraspSettings.from_profile(path, "centred"))
+        x, y = block_xy(rest)
+        run_stage(c, "open")
+        st = run_stage(c, "hover", x=x, y=y, yaw=math.radians(yaw_deg))
+        assert st["state"] == "done", (yaw_deg, st)
+        joints = {k: float(v) for k, v in dash.m.items()}
+        _, closing = KIN.tool_axes(joints)
+        az = math.degrees(math.atan2(closing[1], closing[0]))
+        assert abs((az - yaw_deg + 45.0) % 90.0 - 45.0) < 4.0, (yaw_deg, az)           # the jaws close across a pair of the block's faces
+        unit = np.array(closing[:2]) / np.hypot(*closing[:2])
+        middle = tip(joints)[:2] + jaw_middle_offset(KIN, 92.0) * unit
+        assert np.hypot(*(middle - [x, y])) < 0.008, (yaw_deg, middle, (x, y))          # the middle of the open jaws is over the block's centre
+        assert c.state()["grasp"]["stage"] == "hover"

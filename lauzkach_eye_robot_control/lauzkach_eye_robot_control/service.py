@@ -6,6 +6,8 @@ It holds the camera-rectangle -> arm calibration, the lag protections and the co
 
 from __future__ import annotations
 
+import math
+
 import threading
 import time
 from collections.abc import Callable
@@ -220,7 +222,8 @@ class DriveService:
         label = f"the clicked point (u {u:.2f}, v {v:.2f})"
         return self._move_closed(env, u, v, height_cm, label) if closed_loop else self._move(env, u, v, height_cm, label, real)
 
-    def grasp(self, env: dict, action: str, px: float | None = None, py: float | None = None, confirm_real: bool = False) -> dict:
+    def grasp(self, env: dict, action: str, px: float | None = None, py: float | None = None, confirm_real: bool = False,
+              box: list | None = None) -> dict:
         """One stage of the supervised real grasp (open, hover, lower, close, lift, putback). The agent enforces the order and the safety checks."""
         duplicate = self._admit(env)
         if duplicate:
@@ -228,7 +231,7 @@ class DriveService:
         self._require_real(False, confirm_real)
         if not hasattr(self.real, "grasp_action"):
             raise ApiError(409, "This arm client cannot grasp.", "no_grasp")
-        x = y = None
+        x = y = yaw = None
         if action == "hover":
             if px is None or py is None:
                 raise ApiError(400, "Click the block on the picture first.", "bad_request")
@@ -236,8 +239,14 @@ class DriveService:
             if not (-INSIDE_MARGIN <= u <= 1 + INSIDE_MARGIN and -INSIDE_MARGIN <= v <= 1 + INSIDE_MARGIN):
                 raise ApiError(400, "That click is outside the rectangle.", "outside")
             x, y = self._require_map().uv_to_xy(min(1.0, max(0.0, u)), min(1.0, max(0.0, v)))
+            if box and len(box) >= 2:                              # the detected block's outline: its rotation in the ARM's frame (mod 90 degrees)
+                (bx0, by0), (bx1, by1) = box[0], box[1]
+                u0, v0 = px_to_uv(self._matrix(), bx0, by0, self.faces)
+                u1, v1 = px_to_uv(self._matrix(), bx1, by1, self.faces)
+                (xa, ya), (xb, yb) = self._require_map().uv_to_xy(u0, v0), self._require_map().uv_to_xy(u1, v1)
+                yaw = math.atan2(yb - ya, xb - xa)
         try:
-            result = self.real.grasp_action(action, x, y)
+            result = self.real.grasp_action(action, x, y, yaw) if yaw is not None else self.real.grasp_action(action, x, y)
         except RuntimeError as exc:
             self._note(f"The real arm refused the grasp step '{action}': {exc}")
             raise ApiError(409, str(exc), "real_refused") from exc

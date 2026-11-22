@@ -41,6 +41,7 @@ function draw() {
   const det = shown.detection, k = overlay.width / det.width, ui = dpr * 1.05;
   const S = p => [p[0] * k, p[1] * k];
   const on = layers();
+  drawBlocks(k, ui);
 
   if (on.lines) for (const l of det.lines) if (!l.name) segment(S(l.p0), S(l.p1), 'rgba(52,198,255,.8)', 1.2 * ui);
   const smooth = shown.polygon_shown;   // the locked rectangle once calibrated, otherwise the smoothed live one
@@ -340,10 +341,13 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventD
 overlay.addEventListener('pointerup', e => {                 // a click on the picture chooses a target (it moves nothing by itself)
   if (!shown || !drive || !drive.enabled || !lockedMatrix() || !downPoint || Math.hypot(e.clientX - downPoint[0], e.clientY - downPoint[1]) > 8) return;
   const rect = overlay.getBoundingClientRect(), k = shown.detection.width / rect.width;
-  const px = (e.clientX - rect.left) * k, py = (e.clientY - rect.top) * k, uv = uvOfPixel(px, py);
+  let px = (e.clientX - rect.left) * k, py = (e.clientY - rect.top) * k, snapped = null;
+  const near = (shown.blocks || []).map(b => [Math.hypot(b.px[0] - px, b.px[1] - py), b]).sort((a, b) => a[0] - b[0])[0];
+  if (near && near[0] < 40) { snapped = near[1]; px = snapped.px[0]; py = snapped.px[1]; }       // a click on a detected block aims at its centre
+  const uv = uvOfPixel(px, py);
   if (!uv || uv[0] < -0.03 || uv[0] > 1.03 || uv[1] < -0.03 || uv[1] > 1.03) { status('That click is outside the rectangle.', 'bad'); return; }
-  target = {px, py}; const xy = xyOfUv(uv[0], uv[1]);
-  $('target-text').textContent = `u ${uv[0].toFixed(2)}, v ${uv[1].toFixed(2)}${xy ? ` → x ${(xy[0] * 100).toFixed(1)}, y ${(xy[1] * 100).toFixed(1)} cm from the arm base` : ''}`;
+  target = {px, py, block: snapped}; const xy = xyOfUv(uv[0], uv[1]);
+  $('target-text').textContent = `${snapped ? snapped.colour + ' block, ' : ''}u ${uv[0].toFixed(2)}, v ${uv[1].toFixed(2)}${xy ? ` → x ${(xy[0] * 100).toFixed(1)}, y ${(xy[1] * 100).toFixed(1)} cm from the arm base` : ''}`;
   renderDrive();
 });
 let downPoint = null;
@@ -432,16 +436,64 @@ function renderGrasp() {
   card.querySelectorAll('button[data-grasp]').forEach(b => {
     const a = b.dataset.grasp;
     b.disabled = busy || !allowed.has(a) || (a === 'hover' && !target) || !real.connected;
-    b.classList.toggle('next', !b.disabled && a !== 'open');
+    b.classList.toggle('next', !b.disabled && a === (g.next || [])[0]);                 // highlight the step to press next
   });
 }
 document.querySelectorAll('#grasp-card button[data-grasp]').forEach(b => b.addEventListener('click', async () => {
   const action = b.dataset.grasp;
   if (!confirm(`REAL ARM: ${GRASP_TEXT[action]}\n\nWatch the gripper camera and keep Stop (Esc) ready. Continue?`)) return;
   const body = {action, confirm_real: true};
-  if (action === 'hover') { body.px = target.px; body.py = target.py; }
+  if (action === 'hover') { body.px = target.px; body.py = target.py; if (target.block && target.block.box_px) body.box = target.block.box_px; }
   await drivePost('/api/drive/grasp', body, `Grasp step: ${action}`);
 }));
 const _renderDrive2 = renderDrive;
 renderDrive = function () { _renderDrive2(); renderGrasp(); };
 renderGrasp();
+
+
+// Coloured blocks found in the overhead picture: markers on the picture and a row of buttons that select one as the target.
+const BLOCK_CSS = {red: '#e5383b', blue: '#3a6ff7', green: '#2fb344', yellow: '#f2c200', wood: '#c9a36b'};
+function drawBlocks(k, ui) {
+  for (const b of (shown && shown.blocks) || []) {
+    const x = b.px[0] * k, y = b.px[1] * k, selected = target && target.block && target.block.px[0] === b.px[0] && target.block.px[1] === b.px[1];
+    const col = BLOCK_CSS[b.colour] || '#fff', box = (b.box_px || []).map(p => [p[0] * k, p[1] * k]);
+    if (box.length === 4) {                                                // the detected block as a square, turned like the block
+      ctx.lineJoin = 'round'; ctx.strokeStyle = '#fff'; ctx.lineWidth = (selected ? 6 : 4) * ui;
+      ctx.beginPath(); box.forEach(([px_, py_], i) => (i ? ctx.lineTo(px_, py_) : ctx.moveTo(px_, py_))); ctx.closePath(); ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = (selected ? 3.5 : 2) * ui; ctx.stroke();
+    }
+    if (selected && box.length === 4) {                                    // what the arm aims at: the centre, and the two jaws closing across the faces
+      ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = 2.5 * ui; ctx.beginPath(); ctx.moveTo(x - 12 * ui, y); ctx.lineTo(x + 12 * ui, y); ctx.moveTo(x, y - 12 * ui); ctx.lineTo(x, y + 12 * ui); ctx.stroke();
+      const ex = (box[1][0] - box[0][0]), ey = (box[1][1] - box[0][1]), el = Math.hypot(ex, ey) || 1, nx = -ey / el, ny = ex / el;   // across the first edge
+      for (const sgn of [-1, 1]) {
+        const cx = x + sgn * (Math.abs(nx * (box[2][0] - box[1][0]) + ny * (box[2][1] - box[1][1])) / 2 + 7 * ui) * nx, cy = y + sgn * (Math.abs(nx * (box[2][0] - box[1][0]) + ny * (box[2][1] - box[1][1])) / 2 + 7 * ui) * ny;
+        ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = 4 * ui; ctx.beginPath(); ctx.moveTo(cx - ex / el * 14 * ui, cy - ey / el * 14 * ui); ctx.lineTo(cx + ex / el * 14 * ui, cy + ey / el * 14 * ui); ctx.stroke();
+      }
+    } else {
+      ctx.strokeStyle = col; ctx.lineWidth = 2 * ui; ctx.beginPath(); ctx.arc(x, y, 3 * ui, 0, 7); ctx.stroke();
+    }
+    label(`${b.colour} ${b.yaw_deg.toFixed(0)}°`, x + 26 * ui, y - 14 * ui, '#fff', 11 * ui);
+  }
+}
+let blocksSig = '';
+function renderBlocksSeen() {
+  const box = $('blocks-seen'), list = (shown && shown.blocks) || [];
+  const sig = list.map(b => `${b.colour}${b.px}`).join('|') + (target && target.block ? `#${target.block.px}` : '');
+  if (sig === blocksSig) return;
+  blocksSig = sig;
+  box.replaceChildren(document.createTextNode(list.length ? 'Blocks seen: ' : 'Blocks seen: none (the arm may hide them).'));
+  for (const b of list) {
+    const btn = document.createElement('button'), dot = document.createElement('span');
+    dot.className = 'dot'; dot.style.background = BLOCK_CSS[b.colour] || '#999';
+    btn.append(dot, `${b.colour} (${b.cm[0].toFixed(0)}, ${b.cm[1].toFixed(0)} cm)`);
+    btn.onclick = () => {
+      const uv = uvOfPixel(b.px[0], b.px[1]); if (!uv) return;
+      target = {px: b.px[0], py: b.px[1], block: b}; const xy = xyOfUv(uv[0], uv[1]);
+      $('target-text').textContent = `${b.colour} block, u ${uv[0].toFixed(2)}, v ${uv[1].toFixed(2)}${xy ? ` → x ${(xy[0] * 100).toFixed(1)}, y ${(xy[1] * 100).toFixed(1)} cm from the arm base` : ''}`;
+      renderDrive(); draw();
+    };
+    box.append(btn);
+  }
+}
+const _draw3 = draw;
+draw = function () { _draw3(); renderBlocksSeen(); };

@@ -110,11 +110,12 @@ def make_handler(agent: AgentState):
                     action = str(body["action"])
                     x = None if body.get("x") is None else float(body["x"])
                     y = None if body.get("y") is None else float(body["y"])
+                    yaw = None if body.get("yaw") is None else float(body["yaw"])
                 except (KeyError, TypeError, ValueError):
                     return self._send(400, {"error": "action (and x, y for hover) are required"})
                 with agent.lock:
                     try:
-                        return self._send(200, agent.client.grasp_action(action, x, y))
+                        return self._send(200, agent.client.grasp_action(action, x, y, yaw))
                     except RuntimeError as exc:
                         return self._send(409, {"error": str(exc)})
             if self.path == "/go":
@@ -148,7 +149,7 @@ def main() -> None:
     ap.add_argument("--pause-s", type=float, default=0.35)
     ap.add_argument("--max-step-deg", type=float, default=3.0)
     ap.add_argument("--grasp-profiles", default=str(Path(__file__).resolve().parents[1] / "grasp_profiles.json"), help="JSON with the grasp settings profiles")
-    ap.add_argument("--grasp-profile", default="sim_elite", help="which profile the staged grasp uses (current, sim_elite)")
+    ap.add_argument("--grasp-profile", default="centred", help="which profile the staged grasp uses (current, sim_elite, centred)")
     args = ap.parse_args()
 
     from robotic_arm.clickmove import pooled_http          # the arm's kinematics: soarm_lab must be importable

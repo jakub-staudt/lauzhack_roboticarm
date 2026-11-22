@@ -67,6 +67,7 @@ class GraspSettings:
     lower_max_sag_deg: float = 4.5        # a joint further than this behind its command = something resists: stop
 
     pick_offset_override: float | None = None   # aim this far behind the block's centre along the jaw axis (a profile's value); None: computed
+    align: str = "offset"                       # "jaw_middle": aim so the MIDDLE between the open jaws is over the block's centre (computed from the model)
     profile: str = "current"
 
     @property
@@ -87,6 +88,22 @@ class GraspSettings:
     @property
     def grasp_tip_m(self) -> float:
         return self.grasp_tip_above_table_m
+
+
+def jaw_middle_offset(kin, gripper: float) -> float:
+    """Distance [m] from the tool point to the middle between the two fingertips along the jaw-closing axis, for a gripper opening (from the
+    arm's model). Aiming the tool point this far BEHIND a block's centre puts the middle of the open jaws over the block's centre."""
+    import mujoco
+    data = mujoco.MjData(kin.model)
+    joints = {"shoulder_pan": 0.0, "shoulder_lift": -23.3, "elbow_flex": 46.4, "wrist_flex": 3.3, "wrist_roll": 0.0, "gripper": float(gripper)}
+    kin.write_qpos(data.qpos, kin.to_q(joints))
+    mujoco.mj_forward(kin.model, data)
+    pose = kin.tcp(joints)
+    zs = []
+    for tip in kin.spec.fingertips:
+        gid = next(i for i in range(kin.model.ngeom) if (mujoco.mj_id2name(kin.model, mujoco.mjtObj.mjOBJ_GEOM, i) or "").endswith(tip))
+        zs.append(float((np.array(pose[:3, :3]).T @ (data.geom_xpos[gid] - np.array(pose[:3, 3])))[2]))
+    return float(sum(zs) / len(zs))
 
 
 class PacedMover(Mover):
@@ -367,6 +384,8 @@ class RealArmClient:
         self._token: str | None = None
         self._lock = threading.Lock()
         self.gs = grasp_settings or GraspSettings()
+        if self.gs.align == "jaw_middle":
+            self.gs.pick_offset_override = jaw_middle_offset(kin, self.gs.open_value)
         self.grasp: dict = {"stage": "idle", "pending": None}
 
     # ------------------------------------------------------------------ the lease, held only for the length of a move
@@ -510,7 +529,7 @@ class RealArmClient:
             self.grasp["last"] = status.get("message", "")
         self.grasp["pending"] = None
 
-    def grasp_action(self, action: str, x: float | None = None, y: float | None = None) -> dict:
+    def grasp_action(self, action: str, x: float | None = None, y: float | None = None, yaw: float | None = None) -> dict:
         self._settle_stage()
         if self.mover.busy():
             raise MoveError("The arm is still moving. Wait for it to finish.")
@@ -531,7 +550,7 @@ class RealArmClient:
                 raise MoveError("Click the block on the picture first.")
             if not (self.box[0] <= x <= self.box[1] and self.box[2] <= y <= self.box[3]):
                 raise MoveError("That point is outside the area the arm was calibrated on.")
-            return self._grasp_hover(state, measured, floor, float(x), float(y))
+            return self._grasp_hover(state, measured, floor, float(x), float(y), yaw)
         if action == "lower":
             return self._grasp_lower(state, measured, floor)
         if action == "close":
@@ -644,7 +663,26 @@ class RealArmClient:
             ax, ay = x - self.gs.pick_offset_m * cx / norm, y - self.gs.pick_offset_m * cy / norm
         return ax, ay, pitch
 
-    def _grasp_hover(self, state: dict, measured: dict[str, float], floor, x: float, y: float) -> dict:
+    def _choose_roll(self, tilted: dict[str, float], x: float, y: float, yaw: float, limits: dict) -> float | None:
+        """The wrist roll that puts the jaw-closing axis parallel to a pair of the block's faces (yaw is one face direction, in the arm's
+        frame; the cube is the same turned by 90 degrees). Scans the allowed roll range using the arm's own kinematics, keeps 5 degrees from
+        the limits and picks the solution nearest the current roll. None if the range has no solution."""
+        lo, hi = (limits.get("wrist_roll") or (-150.0, 150.0))
+        best = None
+        for r in np.arange(lo + 5.0, hi - 5.0 + 1e-9, 1.0):
+            joints = {**tilted, "wrist_roll": float(r)}
+            pose = self.kin.tcp(joints)
+            _, closing = self.kin.tool_axes(joints)
+            dth = math.atan2(y, x) - math.atan2(float(pose[1, 3]), float(pose[0, 3]))           # the hover turns the gripper with the shoulder
+            az = math.atan2(float(closing[1]), float(closing[0])) + dth
+            err = math.degrees((az - yaw + math.pi / 4) % (math.pi / 2) - math.pi / 4)             # distance to the nearest face direction, -45..45
+            if abs(err) <= 2.0:
+                cost = abs(r - tilted["wrist_roll"])
+                if best is None or cost < best[0]:
+                    best = (cost, float(r))
+        return None if best is None else best[1]
+
+    def _grasp_hover(self, state: dict, measured: dict[str, float], floor, x: float, y: float, yaw: float | None = None) -> dict:
         gs = self.gs
         if measured["gripper"] < gs.open_value - 12:
             raise MoveError("Open the gripper first.")
@@ -656,6 +694,12 @@ class RealArmClient:
         last_error: MoveError | None = None
         for pitch in wanted:
             tilted = {**measured, "wrist_flex": wf + (pitch - pitch0)}          # same jaw direction, only the tilt changes
+            if yaw is not None:                                                 # turn the wrist so the jaws close across the block's faces
+                roll = self._choose_roll(tilted, x, y, yaw, limits)
+                if roll is None:
+                    last_error = MoveError("the wrist cannot turn the jaws parallel to the block's faces within its roll limits")
+                    continue
+                tilted = {**tilted, "wrist_roll": roll}
             ax, ay, _ = self._tool_aim(tilted, x, y)
             try:
                 try:
@@ -669,8 +713,13 @@ class RealArmClient:
         else:
             raise MoveError(f"The arm cannot hover over that block with the gripper pointing about 66 to 78 degrees below horizontal "
                             f"({last_error}). Try a block nearer the base.")
+        notes = []
         if abs(pitch - pitch0) > 1.0:
-            self.mover._set(message=f"Tilting the gripper from {pitch0:.0f} to {pitch:.0f} degrees below horizontal while hovering.")
+            notes.append(f"tilting the gripper from {pitch0:.0f} to {pitch:.0f} degrees below horizontal")
+        if yaw is not None:
+            notes.append(f"turning the wrist to {tilted['wrist_roll']:.0f} degrees so the jaws close across the block's faces")
+        if notes:
+            self.mover._set(message="Hovering, " + " and ".join(notes) + ".")
         return self._launch_job("hover over the block", lambda t: self.mover.run_waypoints(t, wps, "hover over the block"),
                                 ("hover", {"block": (x, y), "aim": (ax, ay)}))
 

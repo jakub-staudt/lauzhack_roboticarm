@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 import cv2
 import numpy as np
 
+from lauzkach_eye_robot_control.blocks import detect_blocks
 from lauzkach_eye_robot_control.camera import FileSource, FrameSource, MjpegSource, decode
 from lauzkach_eye_robot_control.detect import detect, rectify
 from lauzkach_eye_robot_control.closedloop import SimMover, SimTruthObserver
@@ -111,12 +112,19 @@ class Analyzer:
         if shown is not None:
             crop = cv2.imencode(".jpg", rectify(image, shown, 360), [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()
         with self.lock:
+            matrix = self.cal.get("px_to_cm") if self.cal["state"] == "locked" else None
+        try:
+            blocks = detect_blocks(image, matrix) if matrix is not None else []
+        except Exception as exc:  # noqa: BLE001 - the picture still works without the block markers
+            print(f"block detection error: {type(exc).__name__}: {exc}", flush=True)
+            blocks = []
+        with self.lock:
             self.frames[seq] = (jpeg, crop)
             while len(self.frames) > KEEP_FRAMES:
                 self.frames.popitem(last=False)
             self.result = {"seq": seq, "received": received, "detect_ms": round(elapsed, 1), "detection": found,
                            "polygon_shown": None if shown is None else [[round(float(x), 1), round(float(y), 1)] for x, y in shown],
-                           "locked": locked is not None, "has_crop": crop is not None}
+                           "locked": locked is not None, "has_crop": crop is not None, "blocks": blocks}
 
     # ---------------------------------------------------------------- calibration (called with self.lock held)
     def recalibrate(self) -> None:
@@ -312,7 +320,8 @@ class Handler(BaseHTTPRequestHandler):
                                                bool(body.get("closed_loop", False)), str(body.get("target", "sim")), bool(body.get("confirm_real", False)))
             elif path == "/api/drive/grasp":
                 result = self.service.grasp(envelope, str(body["action"]), None if body.get("px") is None else float(body["px"]),
-                                            None if body.get("py") is None else float(body["py"]), bool(body.get("confirm_real", False)))
+                                            None if body.get("py") is None else float(body["py"]), bool(body.get("confirm_real", False)),
+                                            body.get("box"))
             elif path == "/api/drive/corner":
                 result = self.service.go_corner(envelope, int(body["index"]), float(body.get("height_cm", 3.0)), bool(body.get("closed_loop", False)),
                                                 str(body.get("target", "sim")), bool(body.get("confirm_real", False)))
