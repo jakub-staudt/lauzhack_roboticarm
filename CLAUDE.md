@@ -9,6 +9,12 @@ point and put it at the selected destination. The table has a rectangle with Apr
 in rectangle coordinates `(u, v)`, each 0..1. Only the overhead camera is used. A teammate builds the eye tracking and
 sends `(u, v)` start/end points; the user builds the arm side and the web UI.
 
+## Current status (2026-11-22)
+- **The real arm picks and places blocks with step buttons** (camera page on :8820, grasp card): open, hover, lower, grip, lift, put back and release, park. Each step is
+  pressed and confirmed by the user, who keeps Stop (Esc) ready. The arm agent runs next to the controller on the server (`~/arm_agent`, tmux session `arm_agent`, port 8790,
+  token in `~/arm_agent/token`), see `lauzkach_eye_robot_control/docs/AGENT_DEPLOY.md`. Not built: fully automatic pick-and-place, eye-tracking input, gripper-camera
+  alignment before lowering (only the lowering stop), moving blocks to a chosen destination.
+
 ## Hard rules
 - **A working version of the arm software runs on the RAMION server** (`ramion-server-01`, Tailscale `100.85.56.14`,
   controller `:8765`, dashboard `:8780`). Never break it; the user must be able to revive it. Only read-only calls

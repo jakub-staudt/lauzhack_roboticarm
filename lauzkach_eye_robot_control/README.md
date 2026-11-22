@@ -1,5 +1,13 @@
 # lauzkach_eye_robot_control
 
+> **Status (2026-11-22): you can pick and place blocks with the real arm using step buttons.**
+> The camera page has a "Grasp a block (REAL arm), one supervised step at a time" card: Open gripper, Hover over the clicked/selected block,
+> Lower to grasp height, Grip, Lift, Put back and release, plus Go to park position / Save current arm pose as park. Blocks are found by colour in
+> the overhead picture (turned square outline), the hover centres the middle of the open jaws on the block and turns the wrist to its faces, and the
+> gripper camera stops the lowering when the block's lower edge reaches the bottom of its picture. Each step is pressed and confirmed by a person;
+> a fully automatic pick-and-place (and the eye-tracking input) is not built yet. Settings: `grasp_profiles.json` (`centred`, `sim_elite`, `current`);
+> park pose: `park_pose.json`; how the arm agent runs on the server: `docs/AGENT_DEPLOY.md`.
+
 Separate project for the eye-controlled robot arm. It lives next to the RAMION software and does **not** change it.
 Step 1 (this version): find the **left rectangle** (the 20 x 20 cm square) in the overhead camera and draw what the
 detector believes on a web page, so it can be checked by eye.
