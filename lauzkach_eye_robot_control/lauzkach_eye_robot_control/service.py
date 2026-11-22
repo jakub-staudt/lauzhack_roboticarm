@@ -32,6 +32,7 @@ class DriveService:
                  closed_loop: tuple[servo.Mover, servo.Observer] | None = None, servo_config: servo.ServoConfig | None = None,
                  sim_calibration_error: tuple[float, float] = (0.0, 0.0), real=None, wrist_fetch=None) -> None:
         self._matrix_source, self.robot_map, self.sim = matrix_source, robot_map, sim
+        self.runner = None
         self.wrist_fetch = wrist_fetch                           # () -> the gripper camera picture (BGR), or None
         self.watcher = None
         self.real = real                                          # the REAL arm (RealArmClient), or None: off unless the server was told to
@@ -80,6 +81,8 @@ class DriveService:
 
     def _hold_after_silence(self) -> None:
         self.guard.stop()
+        if self.runner is not None:
+            self.runner.cancel()
         for client in (self.sim, self.real):
             if client is not None:
                 try:
@@ -137,7 +140,7 @@ class DriveService:
             st = self.real.state()
         except (RuntimeError, OSError, KeyError) as exc:
             return {"available": True, "connected": False, "error": str(exc)}
-        out = {"available": True, "vision": None if self.watcher is None else dict(self.watcher.status), "connected": st["connected"], "task": st["task"], "tip_base": st["tip_base"], "owner": st["owner"],
+        out = {"available": True, "sequence": None if self.runner is None else dict(self.runner.status), "vision": None if self.watcher is None else dict(self.watcher.status), "connected": st["connected"], "task": st["task"], "tip_base": st["tip_base"], "owner": st["owner"],
                "emergency_stop": st["emergency_stop"], "gripper": st["gripper"],
                "height_guard": bool(st.get("height_guard")), "grasp": st.get("grasp")}
         if self.robot_map is not None and matrix is not None:
@@ -264,6 +267,77 @@ class DriveService:
         self._note(f"Grasp step '{action}' started on the REAL arm" + (f" for the block at x {x * 100:.1f}, y {y * 100:.1f} cm." if x is not None else "."))
         return answer
 
+    def _arm_xy(self, px: float, py: float) -> tuple[float, float]:
+        u, v = px_to_uv(self._matrix(), px, py, self.faces)
+        if not (-INSIDE_MARGIN <= u <= 1 + INSIDE_MARGIN and -INSIDE_MARGIN <= v <= 1 + INSIDE_MARGIN):
+            raise ApiError(400, "That point is outside the rectangle.", "outside")
+        return self._require_map().uv_to_xy(min(1.0, max(0.0, u)), min(1.0, max(0.0, v)))
+
+    def pick_place(self, env: dict, pick: dict | None, dest: dict, others: list | None = None, confirm_real: bool = False, park_after: bool = True) -> dict:
+        """Move the block at `pick` ({px, py, box, colour}) to `dest` ({px, py}); `others`: the other detected blocks' picture positions.
+        If the arm is already holding a block (an earlier try stopped after the grip), `pick` is not needed: it carries on from there."""
+        duplicate = self._admit(env)
+        if duplicate:
+            return duplicate
+        self._require_real(False, confirm_real)
+        if not hasattr(self.real, "grasp_action"):
+            raise ApiError(409, "This arm client cannot grasp.", "no_grasp")
+        if self.runner is not None and self.runner.busy():
+            raise ApiError(409, "A pick and place is already running. Press Stop first.", "busy")
+        try:
+            stage = (self.real.state().get("grasp") or {}).get("stage", "idle")
+        except (RuntimeError, OSError, KeyError):
+            stage = "idle"
+        first = {"closed": 4, "lifted": 5, "carried": 6}.get(stage, 0)                 # continue with the step after the last one done
+        dx_, dy_ = self._arm_xy(float(dest["px"]), float(dest["py"]))
+        bx = by = yaw = colour = None
+        if first == 0:
+            if not pick:
+                raise ApiError(400, "Choose the starting block first.", "bad_request")
+            bx, by = self._arm_xy(float(pick["px"]), float(pick["py"]))
+            # Only before the pick-up: the destination must not be on another block. The picked block itself is not "another block" (the detector's
+            # centre for it moves a little from frame to frame), and once a block is held no block-distance checks are made at all.
+            for o in (others or []):
+                ox, oy = self._arm_xy(float(o[0]), float(o[1]))
+                if math.hypot(ox - bx, oy - by) < 0.035:
+                    continue
+                if math.hypot(dx_ - ox, dy_ - oy) < 0.055:
+                    raise ApiError(400, "The destination is on top of another block: choose a free spot.", "bad_request")
+            if math.hypot(dx_ - bx, dy_ - by) < 0.06:
+                raise ApiError(400, "The destination is too close to the starting block (needs 6 cm).", "bad_request")
+            box = pick.get("box")
+            if box and len(box) >= 2:
+                (u0, v0), (u1, v1) = px_to_uv(self._matrix(), box[0][0], box[0][1], self.faces), px_to_uv(self._matrix(), box[1][0], box[1][1], self.faces)
+                (xa, ya), (xb, yb) = self._require_map().uv_to_xy(u0, v0), self._require_map().uv_to_xy(u1, v1)
+                yaw = math.atan2(yb - ya, xb - xa)
+            colour = pick.get("colour")
+        elif pick:
+            colour = pick.get("colour")
+        real = self.real
+
+        def step(action: str) -> dict:
+            kw = {"hover": dict(x=bx, y=by, yaw=yaw), "carry": dict(x=dx_, y=dy_), "place": dict(park_after=park_after)}.get(action, {})
+            try:
+                result = real.grasp_action(action, **{k: v for k, v in kw.items() if v is not None})
+            except RuntimeError as exc:
+                self._note(f"The real arm refused '{action}': {exc}")
+                raise
+            if action == "lower" and colour and self.wrist_fetch is not None:
+                from lauzkach_eye_robot_control.lower_watch import LowerWatcher
+                self.watcher = LowerWatcher(colour, self.wrist_fetch, lambda: real.state()["task"]["state"] in ("planning", "running"),
+                                            lambda: real.grasp_action("lower_stop"), self._note).start()
+            return result
+
+        from lauzkach_eye_robot_control.pickplace import PickPlaceRunner
+        self.runner = PickPlaceRunner(step, real.state, self._note)
+        label = (f"{colour or 'the'} block from x {bx * 100:.1f}, y {by * 100:.1f} cm to x {dx_ * 100:.1f}, y {dy_ * 100:.1f} cm" if first == 0
+                 else f"the block the arm is holding to x {dx_ * 100:.1f}, y {dy_ * 100:.1f} cm")
+        self.runner.start(label, first)
+        self._note(f"Pick and place started on the REAL arm: {label}" + ("" if first == 0 else f" (carrying on from step {first + 1})") + ".")
+        answer = {"sequence": dict(self.runner.status), "real": True}
+        self.guard.record(env.get("cid"), answer)
+        return answer
+
     def go_corner(self, env: dict, index: int, height_cm: float, closed_loop: bool = False, target: str = "sim",
                   confirm_real: bool = False) -> dict:
         duplicate = self._admit(env)
@@ -283,6 +357,8 @@ class DriveService:
         """A soft stop: halt the arm where it is and void every move still on its way. NOT the controller's emergency stop:
         nothing latches, and the next move can be sent right away."""
         generation = self.guard.stop()
+        if self.runner is not None:
+            self.runner.cancel()
         held = True
         for name, client in (("simulator", self.sim), ("real arm", self.real)):
             if client is None:

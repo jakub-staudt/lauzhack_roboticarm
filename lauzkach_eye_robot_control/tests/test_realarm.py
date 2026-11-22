@@ -303,7 +303,7 @@ def test_open_hover_lower_grip_lift_putback_for_a_block_that_stalls_the_jaws_at_
     assert dash.cmd["gripper"] == pytest.approx(g["hold_value"] - 1.5, abs=1.0)    # squeezed a little
     z0 = tip(dash.m)[2]
     assert run_stage(c, "lift")["state"] == "done" and tip(dash.m)[2] - z0 > 0.05
-    assert c.state()["grasp"]["stage"] == "lifted" and c.state()["grasp"]["next"] == ["putback"]
+    assert c.state()["grasp"]["stage"] == "lifted" and c.state()["grasp"]["next"] == ["carry", "putback"]
     assert run_stage(c, "putback")["state"] == "done"
     assert dash.m["gripper"] == pytest.approx(80.0, abs=1.5) and c.state()["grasp"]["stage"] == "hover"
     assert dash.owner is None
@@ -688,3 +688,86 @@ def test_lowering_to_grasp_height_without_a_camera_stop_says_the_camera_did_not_
     assert c.state()["grasp"]["visual"] == "not confirmed by the camera"
     with pytest.raises(MoveError, match="not lowering"):
         c.grasp_action("lower_stop")
+
+
+def _gripped(c, dash, rest, **kw):
+    x, y = block_xy(rest)
+    for action, k in (("open", {}), ("hover", dict(x=x, y=y)), ("lower", {}), ("close", {}), ("lift", {})):
+        run_stage(c, action, **k)
+    return x, y
+
+
+def test_carry_then_place_moves_the_gripped_block_to_the_destination_and_releases_it(tmp_path):
+    dash, c, rest, path, _ = park_rig(tmp_path)
+    c.park = {"joints": PARK_JOINTS, "tip_cm": [0, 0, 0]}
+    x, y = _gripped(c, dash, rest)
+    dest = (x + 0.0, y - 0.07)                                                       # 7 cm to the side
+    st = run_stage(c, "carry", x=dest[0], y=dest[1])
+    assert st["state"] == "done", st
+    g = c.state()["grasp"]
+    assert g["stage"] == "carried" and g["next"] == ["place"] and "park" not in g["extra"]
+    from lauzkach_eye_robot_control.realarm import jaw_middle_offset
+    j = {k: float(v) for k, v in dash.m.items()}
+    _, closing = KIN.tool_axes(j)
+    unit = np.array(closing[:2]) / np.hypot(*closing[:2])
+    centre = tip(j)[:2] + c.gs.pick_offset_m * unit
+    assert np.hypot(*(centre - dest)) < 0.012                                       # the block's centre is over the destination
+    st = run_stage(c, "place", park_after=True)
+    assert st["state"] == "done" and "park position" in st["message"], st
+    assert dash.m["gripper"] > 70 and all(abs(dash.m[k] - PARK_JOINTS[k]) < 1.0 for k in PARK_JOINTS)
+    assert c.state()["grasp"]["stage"] == "hover" and dash.owner is None
+
+
+def test_carry_refuses_a_destination_or_a_path_too_close_to_another_block_and_leaves_the_block_gripped(tmp_path):
+    dash, c, rest, path, _ = park_rig(tmp_path)
+    x, y = _gripped(c, dash, rest)
+    with pytest.raises(MoveError, match="only .* from another block"):
+        c.grasp_action("carry", x=x, y=y - 0.07, obstacles=[[x, y - 0.07 - 0.03]])
+    with pytest.raises(MoveError, match="no detour"):
+        c.grasp_action("carry", x=x, y=y - 0.14, obstacles=[[x + 0.005, y - 0.07], [x + 0.08, y - 0.07], [x - 0.08, y - 0.07]])   # a wall of blocks: no way round
+    with pytest.raises(MoveError, match="Choose the destination"):
+        c.grasp_action("carry")
+    assert c.state()["grasp"]["stage"] == "lifted" and dash.owner is None
+    st = run_stage(c, "carry", x=x, y=y - 0.07, obstacles=[[x + 0.15, y + 0.10]])    # a far block is no problem
+    assert st["state"] == "done"
+
+
+def test_carry_goes_around_another_block_that_is_in_the_way_when_it_can(tmp_path):
+    dash, c, rest, path, _ = park_rig(tmp_path)
+    x, y = _gripped(c, dash, rest)
+    dest = (x, y - 0.14)
+    st_before = c.state()["grasp"]["stage"]
+    st = run_stage(c, "carry", x=dest[0], y=dest[1], obstacles=[[x + 0.03, y - 0.07]])          # a block 3 cm beside the straight line
+    assert st["state"] == "done" and "around another block" in st["message"], st
+    assert st_before == "lifted" and c.state()["grasp"]["stage"] == "carried"
+    j = {k: float(v) for k, v in dash.m.items()}
+    _, closing = KIN.tool_axes(j)
+    unit = np.array(closing[:2]) / np.hypot(*closing[:2])
+    centre = tip(j)[:2] + c.gs.pick_offset_m * unit
+    assert np.hypot(*(centre - dest)) < 0.012
+
+
+def test_carry_still_refuses_when_the_destination_itself_is_next_to_a_block(tmp_path):
+    dash, c, rest, path, _ = park_rig(tmp_path)
+    x, y = _gripped(c, dash, rest)
+    with pytest.raises(MoveError, match="only .* from another block"):
+        c.grasp_action("carry", x=x, y=y - 0.10, obstacles=[[x, y - 0.10 - 0.02]])
+
+
+def test_a_gripper_pressing_a_little_on_a_block_is_still_recognised_as_holding_it():
+    dash, c, rest = grasp_rig(gripper_floor=47.5)
+    dash.cmd["gripper"], dash.m["gripper"] = 46.6, 47.5                              # only 0.9 of squeeze (as seen on the real arm)
+    g = c.state()["grasp"]
+    assert g["stage"] == "closed" and "lift" in g["next"]
+
+
+def test_a_block_held_high_above_the_grasp_height_is_recognised_as_lifted_so_carry_is_offered():
+    rest = {k: float(v) for k, v in POINTS[0]["joints"].items()}
+    dash = FakeDashboard(joints=rest, gripper=10.0, gripper_floor=47.5)
+    c = client(dash)
+    x, y = block_xy(rest)
+    for action, kw in (("open", {}), ("hover", dict(x=x, y=y)), ("lower", {}), ("close", {}), ("lift", {})):
+        run_stage(c, action, **kw)
+    c2 = client(dash)                                                               # a fresh agent (restarted): it has no memory of the stages
+    g = c2.state()["grasp"]
+    assert g["stage"] == "lifted" and "carry" in g["next"], g

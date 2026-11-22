@@ -112,11 +112,12 @@ def make_handler(agent: AgentState):
                     y = None if body.get("y") is None else float(body["y"])
                     yaw = None if body.get("yaw") is None else float(body["yaw"])
                     park_after = bool(body.get("park_after", False))
+                    obstacles = [[float(o[0]), float(o[1])] for o in (body.get("obstacles") or [])]
                 except (KeyError, TypeError, ValueError):
                     return self._send(400, {"error": "action (and x, y for hover) are required"})
                 with agent.lock:
                     try:
-                        return self._send(200, agent.client.grasp_action(action, x, y, yaw, park_after))
+                        return self._send(200, agent.client.grasp_action(action, x, y, yaw, park_after, obstacles))
                     except RuntimeError as exc:
                         return self._send(409, {"error": str(exc)})
             if self.path == "/go":

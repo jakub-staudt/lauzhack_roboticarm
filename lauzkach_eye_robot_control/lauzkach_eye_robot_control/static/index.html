@@ -73,21 +73,24 @@
         <button id="go-target" disabled>Move simulator here</button>
       </div>
       <div id="grasp-card" class="drive-block grasp-card" hidden>
-        <div class="grasp-head"><b>Grasp a block (REAL arm), one supervised step at a time</b>
+        <div class="grasp-head"><b>Move a block (REAL arm)</b>
           <span id="blocks-seen" class="blocks-seen">Blocks seen: none yet.</span>
-          <span id="grasp-text">Click the block on the picture, then follow the steps in order. Keep Stop (Esc) ready.</span></div>
-        <div class="grasp-steps">
-          <button data-grasp="open">1 · Open gripper</button>
-          <button data-grasp="hover">2 · Hover over the clicked block</button>
-          <button data-grasp="lower">3 · Lower to grasp height</button>
-          <button data-grasp="close">4 · Grip</button>
-          <button data-grasp="lift">5 · Lift 6 cm</button>
-          <button data-grasp="putback">6 · Put back and release</button>
+          <span id="pp-hold" class="pp-hold" hidden><b>The arm is holding a block.</b> Click a free spot to carry it there (it goes around other blocks if it can), or press "Put the block back".</span>
+          <span id="pp-text">1. Click the block to move (or its button). 2. Click where it should go. 3. Press the green button. Keep Stop (Esc) ready.</span>
+        </div>
+        <div class="pp-choice">
+          <div><span class="pp-label">Starting block</span><b id="pp-pick">not chosen</b></div>
+          <div><span class="pp-label">Destination</span><b id="pp-dest">not chosen</b></div>
+        </div>
+        <div class="pp-actions">
+          <button id="pp-go" class="go" disabled>Move the block to the destination</button>
+          <button id="pp-clear">Clear</button>
+          <button id="pp-putback" title="Lower the block the arm is holding back to where it was and release it">Put the block back</button>
         </div>
         <div class="grasp-steps park-row">
-          <button data-grasp="park" title="Move the arm to the saved park pose (position and orientation), out of the camera's way">Go to park position</button>
-          <button data-grasp="set_park" title="Remember the arm's current pose as the park pose">Save current arm pose as park</button>
-          <label class="check"><input type="checkbox" id="park-after" checked> Park automatically after putting the block back</label>
+          <button data-park="park" title="Move the arm to the saved park pose (position and orientation), out of the camera's way">Go to park position</button>
+          <button data-park="set_park" title="Remember the arm's current pose as the park pose">Save current arm pose as park</button>
+          <label class="check"><input type="checkbox" id="park-after" checked> Park automatically after placing the block</label>
         </div>
         <span id="park-text" class="hint"></span>
         <span id="vision-text" class="hint"></span>

@@ -1,7 +1,7 @@
 """Find the coloured blocks in the overhead picture (plain colour segmentation, no learning).
 
 For every block inside the locked rectangle it gives the colour, the centre of the block's top face (picture pixels and table cm), and
-its rotation on the table. The blocks are about 49 mm cubes (red, blue, green, yellow, and a plain wooden one). The top face is seen
+its rotation on the table. The blocks are about 49 mm cubes (red, blue, green, yellow). The top face is seen
 from above and a little from the side, so with `lift=None` (the camera's height correction is not measured yet) the table position of the
 top face can be off by a centimetre or so toward the camera: good enough to pick a block and aim, then refine with the gripper camera.
 """
@@ -21,8 +21,7 @@ COLOURS: dict[str, list[tuple[tuple[int, int, int], tuple[int, int, int]]]] = {
     "blue": [((100, 140, 40), (128, 255, 255))],
     "green": [((40, 80, 40), (85, 255, 255))],
     "yellow": [((17, 130, 110), (32, 255, 255))],
-    "wood": [((8, 45, 150), (20, 120, 245))],
-}
+}                                                                          # (no brown / wooden block: it is not used)
 BLOCK_CM = 4.9
 MIN_AREA_PX, MAX_AREA_PX = 350, 7000
 

@@ -186,7 +186,7 @@ function xyOfUv(u, v) {                                      // the robot calibr
   return [c[0].x + u * (c[1].x - c[0].x) + v * (c[3].x - c[0].x), c[0].y + u * (c[1].y - c[0].y) + v * (c[3].y - c[0].y)];
 }
 const taskBusy = t => Boolean(t && ['planning', 'running'].includes(t.state));
-const driveBusy = () => Boolean(drive && (taskBusy(drive.sim && drive.sim.task) || taskBusy(drive.real && drive.real.task)));
+const driveBusy = () => Boolean(drive && (taskBusy(drive.sim && drive.sim.task) || taskBusy(drive.real && drive.real.task) || (drive.real && drive.real.sequence && drive.real.sequence.state === 'running')));
 const realSelected = () => $('arm-real').checked;
 const status = (text, tone) => { const e = $('drive-status'); e.textContent = text; e.style.color = tone === 'bad' ? 'var(--bad)' : tone === 'ok' ? 'var(--ok)' : ''; };
 
@@ -344,6 +344,7 @@ overlay.addEventListener('pointerup', e => {                 // a click on the p
   let px = (e.clientX - rect.left) * k, py = (e.clientY - rect.top) * k, snapped = null;
   const near = (shown.blocks || []).map(b => [Math.hypot(b.px[0] - px, b.px[1] - py), b]).sort((a, b) => a[0] - b[0])[0];
   if (near && near[0] < 40) { snapped = near[1]; px = snapped.px[0]; py = snapped.px[1]; }       // a click on a detected block aims at its centre
+  if (realSelected() && !$('grasp-card').hidden) { const uv0 = uvOfPixel(px, py); if (!uv0 || uv0[0] < -0.03 || uv0[0] > 1.03 || uv0[1] < -0.03 || uv0[1] > 1.03) { status('That click is outside the rectangle.', 'bad'); return; } ppClick(px, py, snapped); return; }
   const uv = uvOfPixel(px, py);
   if (!uv || uv[0] < -0.03 || uv[0] > 1.03 || uv[1] < -0.03 || uv[1] > 1.03) { status('That click is outside the rectangle.', 'bad'); return; }
   target = {px, py, block: snapped}; const xy = xyOfUv(uv[0], uv[1]);
@@ -396,7 +397,14 @@ function renderProgress() {
   const bar = $('progress'), name = real ? 'REAL arm' : 'Simulator';
   $('pg-arm').textContent = name; $('pg-arm').classList.toggle('real', real);
   let tone = 'idle', state = 'Ready', detail = 'Waiting for a command.', pct = 0;
-  if (!arm.connected && !(arm.task)) { state = 'Not connected'; detail = real ? 'The real arm is not answering.' : 'The simulator is not answering.'; tone = 'bad'; }
+  const seq = real ? arm.sequence : null;
+  if (seq && seq.state === 'running') {
+    const frac = task.state === 'running' && Number(task.total) ? Math.min(1, ((Number(task.index) || 0) + 1) / Number(task.total)) : 0.05;
+    pct = Math.min(99, Math.round(100 * ((seq.step - 1) + frac) / seq.total)); state = 'Moving the block'; tone = 'busy';
+    detail = `Step ${seq.step} of ${seq.total}: ${seq.name}` + (task.step && task.state === 'running' ? ` (${PHASES[task.step] || task.step})` : '');
+  } else if (seq && seq.state === 'done') { state = 'Block moved'; detail = seq.message; tone = 'ok'; pct = 100; }
+  else if (seq && (seq.state === 'error' || seq.state === 'stopped')) { state = 'Stopped'; detail = seq.message; tone = 'bad'; pct = Math.round(100 * Math.max(0, seq.step - 1) / seq.total); }
+  else   if (!arm.connected && !(arm.task)) { state = 'Not connected'; detail = real ? 'The real arm is not answering.' : 'The simulator is not answering.'; tone = 'bad'; }
   else if (real && arm.emergency_stop) { state = 'EMERGENCY STOP latched'; detail = 'Reset it in the manual page before moving.'; tone = 'bad'; }
   else if (task.state === 'planning') { state = 'Planning the path'; detail = 'Working out the joint angles…'; tone = 'busy'; pct = 2; }
   else if (task.state === 'running') {
@@ -417,52 +425,73 @@ renderDrive = function () { _renderDrive(); renderProgress(); };
 renderProgress();
 
 
-// The staged real grasp: each button is one step; the agent says which steps are allowed next.
-const GRASP_TEXT = {
-  open: 'Open the gripper to 80 (a 73 mm gap). The arm does not move.',
-  hover: 'Move the gripper to about 6 cm above the block you clicked, with the open jaws straddling it.',
-  lower: 'Lower the open gripper straight down to the height of the block\'s centre, in 1 cm steps. It stops if anything resists.',
-  close: 'Close the gripper slowly until it stalls on the block.',
-  lift: 'Lift the block 6 cm straight up.',
-  putback: 'Lower the block back, open the gripper and rise clear (and go to the park position if the box below is ticked).',
-  park: 'Move the arm to the saved park position and orientation: up first, then a slow glide there, out of the camera\'s way.',
-  set_park: 'Remember the arm\'s CURRENT pose (position and orientation) as the park pose. The arm does not move.',
-};
+// Move a block: choose the starting block and the destination on the picture, then one button runs every step.
+let pick = null, dest = null;
+const ppBusy = () => Boolean(drive && drive.real && drive.real.sequence && drive.real.sequence.state === 'running') || driveBusy();
+function otherBlocks() { return ((shown && shown.blocks) || []).filter(b => !pick || Math.hypot(b.px[0] - pick.px[0], b.px[1] - pick.px[1]) > 40); }   // not the picked block itself (its centre jitters)
+function describeUv(px, py) {
+  const uv = uvOfPixel(px, py), xy = uv && xyOfUv(uv[0], uv[1]);
+  return xy ? `x ${(xy[0] * 100).toFixed(1)}, y ${(xy[1] * 100).toFixed(1)} cm from the arm base` : '';
+}
+function choosePick(b) {
+  pick = b; dest = null; $('pp-pick').textContent = `${b.colour} block, ${describeUv(b.px[0], b.px[1])}`;
+  $('pp-dest').textContent = 'click where it should go'; renderGrasp(); draw();
+}
+const holding = () => Boolean(drive && drive.real && drive.real.grasp && ['closed', 'lifted', 'carried'].includes(drive.real.grasp.stage));
+function ppClick(px, py, snapped) {
+  if (ppBusy()) { status('The arm is busy. Press Stop first.', 'bad'); return; }
+  if (holding()) {                                                         // the arm already holds a block: only the destination is needed
+    if (snapped) { status(`That spot is on the ${snapped.colour} block: choose a free spot.`, 'bad'); return; }
+    dest = {px, py}; $('pp-dest').textContent = describeUv(px, py); renderGrasp(); draw(); return;
+  }
+  if (snapped && (!pick || snapped.px[0] === pick.px[0])) { choosePick(snapped); return; }
+  if (!pick) { status('Click one of the coloured blocks first (the one to move).', 'bad'); return; }
+  if (snapped) { status(`That spot is on the ${snapped.colour} block: choose a free spot.`, 'bad'); return; }
+  dest = {px, py}; $('pp-dest').textContent = describeUv(px, py); renderGrasp(); draw();
+}
 function renderGrasp() {
-  const card = $('grasp-card');
-  const real = (drive && drive.real) || {}, g = real.grasp;
+  const card = $('grasp-card'), real = (drive && drive.real) || {}, g = real.grasp;
   card.hidden = !(realSelected() && g);
   if (card.hidden) return;
-  const busy = driveBusy(), allowed = new Set([...(g.next || []), ...(g.extra || [])]);
+  const hold = holding();
+  $('pp-hold').hidden = !hold;
+  if (hold) $('pp-pick').textContent = 'the block the arm is holding';
+  $('pp-go').disabled = !((pick || hold) && dest) || ppBusy() || !real.connected;
+  $('pp-putback').disabled = ppBusy() || !real.connected;
+  $('pp-clear').disabled = ppBusy();
+  const park = g.park;
+  $('park-text').textContent = park ? `Park position saved: tip at x ${park.tip_cm[0]}, y ${park.tip_cm[1]}, height ${park.tip_cm[2]} cm.` : 'No park position saved yet.';
   const vis = real.vision;
   $('vision-text').textContent = vis ? `Gripper camera while lowering (${vis.colour}): ${vis.state}${vis.bottom_px != null ? `; the block's lower edge is at ${vis.bottom_px} of ${vis.height_px} px` : ''}.` : '';
-  $('park-text').textContent = g.park ? `Park position saved: tip at x ${g.park.tip_cm[0]}, y ${g.park.tip_cm[1]}, height ${g.park.tip_cm[2]} cm.` : 'No park position saved yet.';
-  $('grasp-text').textContent = `Stage: ${g.stage}.` + (g.hold_value ? ` Jaws stalled at ${g.hold_value.toFixed(1)}.` : '') + (g.last ? ` ${g.last}` : '') + (g.block ? '' : ' Click the block on the picture first.');
-  card.querySelectorAll('button[data-grasp]').forEach(b => {
-    const a = b.dataset.grasp;
-    b.disabled = busy || !allowed.has(a) || (a === 'hover' && !target) || !real.connected;
-    b.classList.toggle('next', !b.disabled && a === (g.next || [])[0] && a !== 'park' && a !== 'set_park');                 // highlight the step to press next
-  });
+  card.querySelectorAll('button[data-park]').forEach(b => { const a = b.dataset.park; b.disabled = ppBusy() || !(g.extra || []).includes(a); });
 }
-document.querySelectorAll('#grasp-card button[data-grasp]').forEach(b => b.addEventListener('click', async () => {
-  const action = b.dataset.grasp;
-  if (!confirm(`REAL ARM: ${GRASP_TEXT[action]}\n\nWatch the gripper camera and keep Stop (Esc) ready. Continue?`)) return;
-  const body = {action, confirm_real: true};
-  if (action === 'putback' && $('park-after').checked) body.park_after = true;
-  if (action === 'lower' && target && target.block) body.colour = target.block.colour;   // the camera watches this colour while lowering
-  if (action === 'hover') { body.px = target.px; body.py = target.py; if (target.block && target.block.box_px) body.box = target.block.box_px; }
-  await drivePost('/api/drive/grasp', body, `Grasp step: ${action}`);
+$('pp-clear').addEventListener('click', () => { pick = null; dest = null; $('pp-pick').textContent = 'not chosen'; $('pp-dest').textContent = 'not chosen'; renderGrasp(); draw(); });
+$('pp-go').addEventListener('click', async () => {
+  if ((!pick && !holding()) || !dest) return;
+  const label = holding() ? `the block the arm is holding to ${describeUv(dest.px, dest.py)}` : `${pick.colour} block (${describeUv(pick.px[0], pick.px[1])}) to ${describeUv(dest.px, dest.py)}`;
+  if (!confirm(`REAL ARM: move the ${label}?\n\nThe arm will run every step by itself (open, hover, lower with the gripper camera, grip, lift, carry, place, park), about 2 minutes. Watch the arm and keep Stop (Esc) ready.`)) return;
+  await drivePost('/api/drive/pickplace', {pick: pick ? {px: pick.px[0], py: pick.px[1], box: pick.box_px, colour: pick.colour} : null, dest, others: otherBlocks().map(b => b.px),
+                                          park_after: $('park-after').checked, confirm_real: true}, 'Move the block');
+});
+$('pp-putback').addEventListener('click', async () => {
+  if (!confirm('REAL ARM: lower the block the arm is holding back to where it was picked up and release it?\n\nKeep Stop (Esc) ready.')) return;
+  await drivePost('/api/drive/grasp', {action: 'putback', confirm_real: true, park_after: $('park-after').checked}, 'Put the block back');
+});
+document.querySelectorAll('#grasp-card button[data-park]').forEach(b => b.addEventListener('click', async () => {
+  const action = b.dataset.park;
+  const text = action === 'park' ? 'Move the arm to the saved park position and orientation (up first, then a slow glide)?' : 'Remember the arm\'s CURRENT pose as the park pose? The arm does not move.';
+  if (!confirm(`REAL ARM: ${text}\n\nKeep Stop (Esc) ready.`)) return;
+  await drivePost('/api/drive/grasp', {action, confirm_real: true}, action === 'park' ? 'Go to the park position' : 'Save the park pose');
 }));
 const _renderDrive2 = renderDrive;
 renderDrive = function () { _renderDrive2(); renderGrasp(); };
 renderGrasp();
 
-
 // Coloured blocks found in the overhead picture: markers on the picture and a row of buttons that select one as the target.
-const BLOCK_CSS = {red: '#e5383b', blue: '#3a6ff7', green: '#2fb344', yellow: '#f2c200', wood: '#c9a36b'};
+const BLOCK_CSS = {red: '#e5383b', blue: '#3a6ff7', green: '#2fb344', yellow: '#f2c200'};
 function drawBlocks(k, ui) {
   for (const b of (shown && shown.blocks) || []) {
-    const x = b.px[0] * k, y = b.px[1] * k, selected = target && target.block && target.block.px[0] === b.px[0] && target.block.px[1] === b.px[1];
+    const x = b.px[0] * k, y = b.px[1] * k, selected = pick && pick.px[0] === b.px[0] && pick.px[1] === b.px[1];
     const col = BLOCK_CSS[b.colour] || '#fff', box = (b.box_px || []).map(p => [p[0] * k, p[1] * k]);
     if (box.length === 4) {                                                // the detected block as a square, turned like the block
       ctx.lineJoin = 'round'; ctx.strokeStyle = '#fff'; ctx.lineWidth = (selected ? 6 : 4) * ui;
@@ -481,11 +510,22 @@ function drawBlocks(k, ui) {
     }
     label(`${b.colour} ${b.yaw_deg.toFixed(0)}°`, x + 26 * ui, y - 14 * ui, '#fff', 11 * ui);
   }
+  if (pick && dest && pick.box_px) {                                      // where the block will go: a square of the same size and turn, and a line to it
+    const dx = (dest.px - pick.px[0]), dy = (dest.py - pick.px[1]);
+    const sq = pick.box_px.map(p => [(p[0] + dx) * k, (p[1] + dy) * k]);
+    ctx.setLineDash([9 * ui, 6 * ui]); ctx.lineWidth = 4 * ui; ctx.strokeStyle = '#fff';
+    ctx.beginPath(); ctx.moveTo(pick.px[0] * k, pick.px[1] * k); ctx.lineTo(dest.px * k, dest.py * k); ctx.stroke();
+    ctx.beginPath(); sq.forEach(([qx, qy], i) => (i ? ctx.lineTo(qx, qy) : ctx.moveTo(qx, qy))); ctx.closePath(); ctx.stroke();
+    ctx.lineWidth = 2.2 * ui; ctx.strokeStyle = '#1f8a3b';
+    ctx.beginPath(); ctx.moveTo(pick.px[0] * k, pick.px[1] * k); ctx.lineTo(dest.px * k, dest.py * k); ctx.stroke();
+    ctx.beginPath(); sq.forEach(([qx, qy], i) => (i ? ctx.lineTo(qx, qy) : ctx.moveTo(qx, qy))); ctx.closePath(); ctx.stroke();
+    ctx.setLineDash([]); label('destination', dest.px * k + 28 * ui, dest.py * k - 4 * ui, '#b8f0c6', 12 * ui);
+  }
 }
 let blocksSig = '';
 function renderBlocksSeen() {
   const box = $('blocks-seen'), list = (shown && shown.blocks) || [];
-  const sig = list.map(b => `${b.colour}${b.px}`).join('|') + (target && target.block ? `#${target.block.px}` : '');
+  const sig = list.map(b => `${b.colour}${b.px}`).join('|') + (pick ? `#${pick.px}` : '') + (target && target.block ? `@${target.block.px}` : '');
   if (sig === blocksSig) return;
   blocksSig = sig;
   box.replaceChildren(document.createTextNode(list.length ? 'Blocks seen: ' : 'Blocks seen: none (the arm may hide them).'));
@@ -494,6 +534,7 @@ function renderBlocksSeen() {
     dot.className = 'dot'; dot.style.background = BLOCK_CSS[b.colour] || '#999';
     btn.append(dot, `${b.colour} (${b.cm[0].toFixed(0)}, ${b.cm[1].toFixed(0)} cm)`);
     btn.onclick = () => {
+      if (realSelected() && !$('grasp-card').hidden) { ppClick(b.px[0], b.px[1], b); return; }
       const uv = uvOfPixel(b.px[0], b.px[1]); if (!uv) return;
       target = {px: b.px[0], py: b.px[1], block: b}; const xy = xyOfUv(uv[0], uv[1]);
       $('target-text').textContent = `${b.colour} block, u ${uv[0].toFixed(2)}, v ${uv[1].toFixed(2)}${xy ? ` → x ${(xy[0] * 100).toFixed(1)}, y ${(xy[1] * 100).toFixed(1)} cm from the arm base` : ''}`;
