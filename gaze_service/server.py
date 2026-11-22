@@ -68,8 +68,8 @@ class Camera:
     (EyeGestures' VideoCapture blocks forever when macOS withholds the camera)."""
 
     def __init__(self, index: int) -> None:
-        import cv2
-        self.cap = cv2.VideoCapture(index)
+        self.index = index
+        self.cap = None
         self.frame = None
         self.stamp = 0.0
         self.seen = 0.0
@@ -77,12 +77,35 @@ class Camera:
         self.cond = threading.Condition()
         threading.Thread(target=self._reader, daemon=True).start()
 
+    def _open(self):
+        import platform
+
+        import cv2
+        system = platform.system()
+        # DirectShow opens webcams quickly on Windows (as EyeGestures does); AVFoundation is the macOS camera API
+        # (asking for it explicitly also makes OpenCV log macOS's permission answer).
+        backend = {"Windows": cv2.CAP_DSHOW, "Darwin": cv2.CAP_AVFOUNDATION}.get(system, cv2.CAP_ANY)
+        cap = cv2.VideoCapture(self.index, backend)
+        return cap if cap.isOpened() else None
+
     def _reader(self) -> None:
+        failures = 0
         while True:
+            if self.cap is None:
+                # Not open yet (e.g. macOS is still asking for permission): try again, the answer may come later.
+                self.cap = self._open()
+                if self.cap is None:
+                    time.sleep(2.0)
+                    continue
             ok, frame = self.cap.read()
             if not ok or frame is None:
+                failures += 1
+                if failures > 40:              # ~2 s without images: reopen
+                    self.cap.release()
+                    self.cap, failures = None, 0
                 time.sleep(0.05)
                 continue
+            failures = 0
             with self.cond:
                 self.frame, self.stamp = frame, time.time()
                 self.size = (frame.shape[1], frame.shape[0])
@@ -192,8 +215,9 @@ class Tracker(threading.Thread):
         # Keep waiting: the macOS camera prompt (or a permission switched on in Settings) can come later.
         while not self.cap.wait_first(6.0):
             with self.lock:
-                self.error = (f"No images from camera {self.camera_index} yet. On macOS allow the camera for Terminal "
-                              "(System Settings > Privacy & Security > Camera), or try GAZE_CAMERA=1. Still waiting…")
+                self.error = (f"No images from camera {self.camera_index} yet. On macOS allow the camera for the app that started "
+                              "this (Gaze Station or Terminal: System Settings > Privacy & Security > Camera); on Windows allow desktop apps to use the camera "
+                              "(Settings > Privacy > Camera). Or try GAZE_CAMERA=1. Still waiting…")
             log.warning("no images from camera %s yet", self.camera_index)
         with self.lock:
             self.error = ""

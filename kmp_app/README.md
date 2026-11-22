@@ -14,24 +14,57 @@ running. macOS only lets it see the camera when the app was launched from an app
 from Terminal (`./run.command`) and allow Terminal to use the camera. With the Logitech plugged in the camera numbers
 can change: `GAZE_CAMERA=1 ./run.command`.
 
-## Run
+## Setup
 
-1. Simulator (from the repository root, see `simulator/README.md`):
+The app itself is Kotlin; the eye tracker and the simulator are Python and run next to it. The app finds the project
+folder (from `GAZE_REPO`, the working directory, or `~/Documents/LauzHack2026/lauzhack_roboticarm` and similar) and
+starts both if they are not already running; their output goes to `<temp>/GazeStation/*.log`.
 
-   ```sh
-   .venv-sim/bin/python -m simulator.web.server        # http://127.0.0.1:8810
-   ```
+### Python parts (once per machine; Python 3.11, from the repository root)
 
-2. The app, from Terminal (JDK 17; on macOS `brew install openjdk@17`). `./run.command` does the following:
+macOS / Linux:
 
-   ```sh
-   cd kmp_app
-   export JAVA_HOME=$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home
-   ./gradlew :composeApp:run
-   ```
+```sh
+python3.11 -m venv .venv      && .venv/bin/pip install -r requirements.txt             # eye tracker (EyeGestures)
+python3.11 -m venv .venv-sim  && .venv-sim/bin/pip install -r simulator/requirements.txt  # simulator (MuJoCo)
+```
 
-   Other servers: `./gradlew :composeApp:run --args="http://SIM:8810 http://GAZE:8820"`, or `GAZE_STATION_URL` /
-   `GAZE_SERVICE_URL`.
+Windows 10 (PowerShell or cmd):
+
+```bat
+py -3.11 -m venv .venv      && .venv\Scripts\pip install -r requirements.txt
+py -3.11 -m venv .venv-sim  && .venv-sim\Scripts\pip install -r simulator\requirements.txt
+```
+
+### macOS
+
+* **Installed app:** `./gradlew :composeApp:packageMacDmg` builds `composeApp/build/compose/binaries/main/dmg/GazeStation-1.0.0.dmg`.
+  Open it and drag GazeStation to Applications. The first start: right-click > Open (it is not notarised), then allow
+  the camera when macOS asks. Use `packageMacDmg`, not `packageDmg`: it signs the app with `entitlements.plist`, without
+  which macOS silently refuses the camera to the eye tracker.
+* **From the checkout:** `./run.command` in Terminal (starts the eye tracker from Terminal, which needs camera access,
+  then `./gradlew run`). Needs JDK 17 (`brew install openjdk@17`, the script finds it).
+
+### Windows 10
+
+* **Installed app:** build `./gradlew :composeApp:packageMsi` on a Windows PC (or take it from CI, below). It installs per
+  user (no admin) with a Start menu entry. Allow desktop apps to use the camera: Settings > Privacy > Camera.
+* **From the checkout:** `run.bat` (starts the simulator and the eye tracker in their own windows, then the app). Needs
+  JDK 17 (e.g. Temurin) with `JAVA_HOME` set.
+
+### Options
+
+| What | How |
+|---|---|
+| Other servers | `--args="http://SIM:8810 http://GAZE:8820"`, or `GAZE_STATION_URL` / `GAZE_SERVICE_URL` |
+| Eye camera | `GAZE_CAMERA=1` (index; with a USB camera plugged in the built-in one may move) |
+| Project folder | `GAZE_REPO=/path/to/lauzhack_roboticarm` (needed when the installed app cannot find it) |
+
+### Installers from CI
+
+`.github/workflows/kmp-desktop.yml` builds the macOS (Apple Silicon and Intel) and Windows installers on GitHub Actions:
+run it from the Actions tab, or push a tag such as `kmp-v1.0.0` to publish them as a release. Packaging always uses an
+Eclipse Temurin 17 that Gradle downloads itself (Homebrew's JDK is refused by jpackage).
 
 ## Eye tracking window (as in gaze_scene_v2.py)
 
@@ -59,7 +92,8 @@ composeApp/src/
     ui/App.kt, CameraView.kt, ControlPanel.kt, Theme.kt   control window (simulation left, controls right)
     ui/SceneScreen.kt              eye tracking window (colours, rings, banner as in the prototype)
   desktopMain/kotlin/ch/lauzhack/gaze/
-    Main.kt                        the two windows, gaze service auto-start, hidden pointer in the gaze window
+    Main.kt                        the two windows, hidden pointer in the gaze window
+    LocalServices.kt               finds the project and starts the eye tracker / simulator if needed
     Snapshot.kt                    dev tool: scripted run off-screen with a mock gaze, PNG per step
 ```
 
@@ -74,6 +108,17 @@ Goes through the prompts, calibration, object, operation and destination by gaze
 and `control-window.png`.
 It really moves the simulated arm.
 
-## Packaging
+## Android and iOS (next)
 
-`./gradlew :composeApp:packageDmg` (macOS), `packageMsi` (Windows), `packageDeb` (Linux), each on its own OS.
+All UI and logic are in `commonMain` (no JVM-only code); only `Platform.desktop.kt` (image decoding), `Main.kt` and
+`LocalServices.kt` are desktop-specific. To add the mobile targets:
+
+1. **Android:** install Android Studio (SDK), add the `com.android.application` plugin and `androidTarget()`, an
+   `androidMain` with `MainActivity` (`setContent { App(...) }`), `actual fun decodeImage` with `BitmapFactory`, and the
+   `ktor-client-okhttp` engine. The phone cannot start Python, so the simulator and the gaze service run on a laptop
+   and the app connects over the network (Tailscale or Wi-Fi): `--host 0.0.0.0` on the servers.
+2. **iOS:** needs a Mac with full Xcode (this one has only the Command Line Tools). Add `iosArm64()` /
+   `iosSimulatorArm64()` with a framework, an `iosApp` Xcode project, `actual fun decodeImage` via Skia
+   (`Image.makeFromEncoded`) and the `ktor-client-darwin` engine.
+3. **Eye tracking on a phone:** EyeGestures is Python, so either stream the phone's front camera to the laptop's gaze
+   service, or use the platform face tracking (ARKit on iOS, ML Kit / MediaPipe on Android) and send the gaze point.

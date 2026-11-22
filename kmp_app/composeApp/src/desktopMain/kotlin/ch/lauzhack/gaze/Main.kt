@@ -35,9 +35,7 @@ import java.awt.image.BufferedImage
  *
  * Station server: first argument, then $GAZE_STATION_URL, then http://127.0.0.1:8810 (`python -m simulator.web.server`).
  * Gaze service: second argument, then $GAZE_SERVICE_URL, then http://127.0.0.1:8820 (`python -m gaze_service.server`).
- *   If nothing answers there, the app starts it from the repository's .venv on camera $GAZE_CAMERA (default 0, the
- *   built-in MacBook camera) and stops it on exit. The camera permission goes to whatever launched the app
- *   (on macOS: run it from Terminal and allow Terminal to use the camera).
+ * If either is local and not answering, the app starts it from the repository (see LocalServices) and stops it on exit.
  */
 fun main(args: Array<String>) {
     val url = args.getOrNull(0) ?: System.getenv("GAZE_STATION_URL") ?: "http://127.0.0.1:8810"
@@ -47,11 +45,14 @@ fun main(args: Array<String>) {
 
     application {
         val scope = rememberCoroutineScope()
-        val station = remember { StationController(StationApi(url.trimEnd('/')), scope).also { it.start() } }
+        val station = remember {
+            LocalServices.startSimulator(url)
+            StationController(StationApi(url.trimEnd('/')), scope).also { it.start() }
+        }
         val gaze = remember {
             GazeController(GazeApi(gazeUrl.trimEnd('/')), scope).also {
                 it.screenSize = { screen().let { b -> b.width to b.height } }
-                it.launchNote = startGazeService(gazeUrl)
+                it.launchNote = LocalServices.startGazeService(gazeUrl)
                 it.start()
             }
         }
@@ -112,29 +113,5 @@ fun main(args: Array<String>) {
             }
             SceneScreen(scene)
         }
-    }
-}
-
-/** Starts `python -m gaze_service.server` if [url] is local and not answering. Returns a line for the waiting screen. */
-private fun startGazeService(url: String): String? {
-    val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return null
-    if (uri.host !in setOf("127.0.0.1", "localhost")) return null
-    val port = if (uri.port > 0) uri.port else 8820
-    val up = runCatching { java.net.Socket().use { it.connect(java.net.InetSocketAddress(uri.host, port), 300) } }.isSuccess
-    if (up) return null
-    var dir: java.io.File? = java.io.File(System.getProperty("user.dir")).absoluteFile
-    while (dir != null && !java.io.File(dir, "gaze_service/server.py").exists()) dir = dir.parentFile
-    val root = dir ?: return "Could not find gaze_service/ to start the eye tracker. Start it by hand."
-    val windows = System.getProperty("os.name").lowercase().contains("win")
-    val python = java.io.File(root, if (windows) ".venv/Scripts/python.exe" else ".venv/bin/python")
-    if (!python.exists()) return "No Python environment at ${python.path} (pip install -r requirements.txt)."
-    val camera = System.getenv("GAZE_CAMERA") ?: "0"
-    return try {
-        val p = ProcessBuilder(python.path, "-m", "gaze_service.server", "--port", port.toString(), "--camera", camera)
-            .directory(root).inheritIO().start()
-        Runtime.getRuntime().addShutdownHook(Thread { p.destroy() })
-        "Starting the eye tracker on camera $camera (MacBook camera)…"
-    } catch (e: Exception) {
-        "Could not start the eye tracker: ${e.message}"
     }
 }
